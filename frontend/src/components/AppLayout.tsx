@@ -34,6 +34,7 @@ export function AppLayout() {
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
           <nav className="flex items-center gap-1">
             {navLink('/', 'Slabs')}
+            {navLink('/slab-intake', 'Slab Intake')}
             {navLink('/grading-orders', 'Grading Orders')}
             {navLink('/raw-cards', 'Raw Cards', true)}
             {navLink('/raw-cards/add', 'Add raw cards', true)}

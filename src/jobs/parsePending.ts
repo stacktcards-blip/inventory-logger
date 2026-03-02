@@ -1,3 +1,5 @@
+import type { DraftInsert } from '../repositories/purchaseDraftsRepo.js';
+
 const logger = console;
 
 type ParseDeps = {
@@ -12,7 +14,7 @@ type ParseDeps = {
     result_json: Record<string, unknown>;
     error?: string | null;
   }) => Promise<any>;
-  insertDrafts: (drafts: Array<Record<string, unknown>>) => Promise<any[]>;
+  insertDrafts: (drafts: DraftInsert[]) => Promise<unknown[]>;
   parseJapanEmail: (raw: { subject: string | null; from: string | null; bodyText: string }) => {
     orderNo?: string | null;
     confidence: number;

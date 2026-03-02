@@ -31,7 +31,7 @@ export const commitPurchaseSource = async (sourceId: string, committedBy: string
     throw new Error('No drafts found for source');
   }
 
-  const notApproved = drafts.filter((draft) => draft.review_status !== 'approved');
+  const notApproved = (drafts as DraftRow[]).filter((draft) => draft.review_status !== 'approved');
   if (notApproved.length) {
     throw new Error('All drafts must be approved before commit');
   }

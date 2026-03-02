@@ -1,9 +1,9 @@
-import { Router } from 'express';
+import express from 'express';
 import { updateDraft } from '../repositories/purchaseDraftsRepo.js';
 
-export const draftsRouter = Router();
+export const draftsRouter = express.Router();
 
-draftsRouter.patch('/:id', async (req, res, next) => {
+draftsRouter.patch('/:id', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
     const updates = req.body ?? {};
     const draft = await updateDraft(req.params.id, updates);

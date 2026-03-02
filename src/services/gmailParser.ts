@@ -12,9 +12,10 @@ export type GmailMessagePayload = {
 
 export const parseGmailMessage = (message: gmail_v1.Schema$Message): GmailMessagePayload => {
   const headers = message.payload?.headers ?? [];
-  const subject = headers.find((header) => header.name?.toLowerCase() === 'subject')?.value ?? null;
-  const from = headers.find((header) => header.name?.toLowerCase() === 'from')?.value ?? null;
-  const date = headers.find((header) => header.name?.toLowerCase() === 'date')?.value ?? null;
+  type Header = { name?: string | null; value?: string | null };
+  const subject = (headers as Header[]).find((header: Header) => header.name?.toLowerCase() === 'subject')?.value ?? null;
+  const from = (headers as Header[]).find((header: Header) => header.name?.toLowerCase() === 'from')?.value ?? null;
+  const date = (headers as Header[]).find((header: Header) => header.name?.toLowerCase() === 'date')?.value ?? null;
   const snippet = message.snippet ?? null;
 
   const { text, html } = extractBodies(message.payload);

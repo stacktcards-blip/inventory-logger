@@ -1,11 +1,11 @@
-import { Router } from 'express';
+import express from 'express';
 import { listSourcesByStatus, getSourceWithDrafts, updateSourceStatus } from '../repositories/purchaseSourcesRepo.js';
 import { approveDraftsForSource } from '../repositories/purchaseDraftsRepo.js';
 import { commitPurchaseSource } from '../services/commitService.js';
 
-export const sourcesRouter = Router();
+export const sourcesRouter = express.Router();
 
-sourcesRouter.get('/', async (req, res, next) => {
+sourcesRouter.get('/', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
     const status = typeof req.query.status === 'string' ? req.query.status : 'needs_review';
     const sources = await listSourcesByStatus(status);
@@ -15,7 +15,7 @@ sourcesRouter.get('/', async (req, res, next) => {
   }
 });
 
-sourcesRouter.get('/:id', async (req, res, next) => {
+sourcesRouter.get('/:id', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
     const source = await getSourceWithDrafts(req.params.id);
     res.json({ data: source });
@@ -24,7 +24,7 @@ sourcesRouter.get('/:id', async (req, res, next) => {
   }
 });
 
-sourcesRouter.post('/:id/approve', async (req, res, next) => {
+sourcesRouter.post('/:id/approve', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
     const reviewer = req.body?.reviewed_by ?? 'unknown';
     const drafts = await approveDraftsForSource(req.params.id, reviewer);
@@ -35,7 +35,7 @@ sourcesRouter.post('/:id/approve', async (req, res, next) => {
   }
 });
 
-sourcesRouter.post('/:id/commit', async (req, res, next) => {
+sourcesRouter.post('/:id/commit', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
     const committedBy = req.body?.committed_by ?? 'unknown';
     const result = await commitPurchaseSource(req.params.id, committedBy);
