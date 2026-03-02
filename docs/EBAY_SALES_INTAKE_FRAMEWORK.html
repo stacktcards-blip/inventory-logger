@@ -1,0 +1,406 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>eBay Sales Intake Framework</title>
+<style>
+body{font-family:system-ui,-apple-system,BlinkMacSystemFont,sans-serif;max-width:800px;margin:0 auto;padding:24px;line-height:1.6;color:#333}
+h1{font-size:1.75rem;border-bottom:2px solid #333;padding-bottom:8px}
+h2{font-size:1.35rem;margin-top:32px}
+h3{font-size:1.15rem;margin-top:24px}
+h4{font-size:1rem;margin-top:16px}
+table{width:100%;border-collapse:collapse;margin:16px 0;font-size:0.9rem}
+th,td{border:1px solid #ccc;padding:8px;text-align:left}
+th{background:#f5f5f5;font-weight:600}
+pre{background:#f5f5f5;padding:16px;overflow-x:auto;border-radius:4px;font-size:0.85rem}
+code{font-family:ui-monospace,monospace;font-size:0.9em}
+ul{margin:8px 0;padding-left:24px}
+li{margin:4px 0}
+p{margin:8px 0}
+hr{margin:24px 0;border:none;border-top:1px solid #ddd}
+@media print{body{padding:0}table{font-size:0.8rem}pre{font-size:0.75rem}}
+</style>
+</head>
+<body>
+<h1>eBay Sales Intake Tool – Framework (Revised)</h1>
+
+<p>A detailed design for an app that ingests eBay sales from eBay AU, normalizes them via title parsing (carduploader format), stores them in Supabase, and matches them to slabs via manual cert scanning. Includes a <strong>Packing List</strong> (replacing eBay awaiting postage tab) and a <strong>Manual Match</strong> page with barcode scanning.</p>
+
+<hr>
+
+<h2>1. Business Context &amp; Current Workflow</h2>
+
+<h3>1.1 Listing Source</h3>
+
+<ul><li><strong>carduploader.com</strong> – Most listings are generated here.</li><li><strong>Default title format:</strong> <code>Grading company &gt; Grade &gt; Card Name &gt; Card Number &gt; Set Number &gt; Set Name &gt; Set abbreviation &gt; Rarity &gt; Language (if not English) &gt; Card Game</code></li><li>Titles are sometimes manually adjusted for SEO.</li></ul>
+
+<h3>1.2 Current Packing Workflow (to replace)</h3>
+
+<p>1. Open eBay &quot;Awaiting postage&quot; tab.</p>
+<p>2. Pick cards from physical inventory.</p>
+<p>3. Manually parse sales data (date, buyer, price) into a spreadsheet.</p>
+<p>4. Scan cert on slabs with barcode scanner into spreadsheet.</p>
+<p>5. Certs call inventory sheet (Google Sheets) → populate card data (card name, number, acquisition price, grade date, time til sold, profit, etc.).</p>
+
+<h3>1.3 Desired Workflow</h3>
+
+<p>1. <strong>Packing List tab</strong> – Replaces eBay awaiting postage. Shows: <strong>image</strong>, <strong>card name</strong>, <strong>cert</strong> to pick for packing.</p>
+<p>2. <strong>Manual Match page</strong> – After packing, match certs with orders. Editable field for barcode scanning.</p>
+
+<h3>1.4 Matching Approach</h3>
+
+<ul><li><strong>SKU is NOT used</strong> – No SKU system for most listings (auctions may use SKU; treat as edge case).</li><li><strong>Primary matching:</strong> Parse listing title → extract grading company, grade, card name, set number, set name, language, card game.</li><li><strong>Manual approval:</strong> Barcode scanning of certs acts as the manual approval step (parsing is less reliable than SKU).</li></ul>
+
+<hr>
+
+<h2>2. Goals</h2>
+
+<table>
+<tr><th>Goal</th><th>Description</th></tr>
+<tr><td><strong>Ingest eBay sales</strong></td><td>Fetch sold orders from eBay AU (Fulfillment API)</td></tr>
+<tr><td><strong>Parse titles</strong></td><td>Extract card identity from carduploader-format titles</td></tr>
+<tr><td><strong>Store sale records</strong></td><td>Persist in <code>ebay_sales</code> with parsed fields</td></tr>
+<tr><td><strong>Packing List</strong></td><td>Replace eBay awaiting postage tab – show image, card name, cert for unshipped orders</td></tr>
+<tr><td><strong>Manual Match</strong></td><td>Page to scan certs and match sales to slabs (barcode-friendly input)</td></tr>
+<tr><td><strong>Update slabs</strong></td><td>Mark matched slabs as sold, set <code>sold_date</code>, <code>sale_price</code>, <code>ebay_sale_id</code></td></tr>
+<tr><td><strong>Refunds/cancellations</strong></td><td>Separate approval page before reverting slab status</td></tr>
+</table>
+
+<hr>
+
+<h2>3. eBay API Strategy</h2>
+
+<h3>3.1 APIs</h3>
+
+<table>
+<tr><th>API</th><th>Purpose</th><th>Notes</th></tr>
+<tr><td><strong>Sell Fulfillment API</strong></td><td>Orders, line items, fulfillment status</td><td>Primary – <code>getOrders</code> with filters</td></tr>
+<tr><td><strong>Sell Finances API</strong></td><td>Fees, payouts</td><td>Low priority; use if easy to add</td></tr>
+</table>
+
+<h3>3.2 Fulfillment API – getOrders</h3>
+
+<ul><li><strong>Endpoint:</strong> <code>GET https://api.ebay.com/sell/fulfillment/v1/order</code></li><li><strong>Auth:</strong> OAuth 2.0 User Token (seller scope)</li><li><strong>Marketplace:</strong> eBay AU (<code>EBAY_AU</code>)</li><li><strong>Filters:</strong></li></ul>
+<p>  - <code>order.orderFulfillmentStatus</code> = <code>NOT_STARTED</code> or <code>IN_PROGRESS</code> → <strong>awaiting postage</strong> (for Packing List)</p>
+<p>  - <code>creationdate</code> – date range for sync</p>
+<ul><li><strong>Range:</strong> Up to 90 days for filter; up to 2 years for date range</li><li><strong>Returns:</strong> Orders with <code>lineItems[]</code> (title, lineItemId, lineItemCost, itemId, image URL if available)</li></ul>
+
+<h3>3.3 Line Item Data</h3>
+
+<table>
+<tr><th>Field</th><th>Use</th></tr>
+<tr><td><code>lineItemId</code></td><td>Dedupe key</td></tr>
+<tr><td><code>title</code></td><td>Parse for card identity (carduploader format)</td></tr>
+<tr><td><code>sku</code></td><td>Only for auctions; optional match</td></tr>
+<tr><td><code>lineItemCost</code></td><td>Sale price (AUD)</td></tr>
+<tr><td><code>itemId</code></td><td>eBay listing ID – can fetch primary image from Browse API if needed</td></tr>
+<tr><td><code>orderFulfillmentStatus</code></td><td>NOT_STARTED / IN_PROGRESS / FULFILLED</td></tr>
+</table>
+
+<h3>3.4 Auth &amp; Credentials</h3>
+
+<ul><li><strong>App type:</strong> Production (eBay AU)</li><li><strong>OAuth scope:</strong> <code>https://api.ebay.com/oauth/api_scope/sell.fulfillment</code></li><li><strong>Token storage:</strong> Env or Supabase vault</li></ul>
+
+<hr>
+
+<h2>4. Title Parser (carduploader format)</h2>
+
+<h3>4.1 Default Order</h3>
+
+<p><code>Grading company &gt; Grade &gt; Card Name &gt; Card Number &gt; Set Number &gt; Set Name &gt; Set abbreviation &gt; Rarity &gt; Language (if not English) &gt; Card Game</code></p>
+
+<h3>4.2 Fields to Extract</h3>
+
+<table>
+<tr><th>Field</th><th>Target column</th><th>Notes</th></tr>
+<tr><td>Grading company</td><td><code>grading_company</code></td><td>PSA, CGC, BGS, etc.</td></tr>
+<tr><td>Grade</td><td><code>grade</code></td><td>10, 9.5, etc.</td></tr>
+<tr><td>Card name</td><td><code>card_name</code></td><td></td></tr>
+<tr><td>Card number</td><td><code>num</code></td><td></td></tr>
+<tr><td>Set number</td><td><code>set_num</code></td><td></td></tr>
+<tr><td>Set name</td><td><code>set_name</code></td><td></td></tr>
+<tr><td>Set abbreviation</td><td><code>set_abbr</code></td><td>Map to <code>slabs.set_abbr</code>, <code>master_cards</code></td></tr>
+<tr><td>Rarity</td><td><code>rarity</code></td><td></td></tr>
+<tr><td>Language</td><td><code>lang</code></td><td>Default ENG if absent; JPN, etc.</td></tr>
+<tr><td>Card game</td><td><code>card_game</code></td><td>Pokemon, etc.</td></tr>
+</table>
+
+<h3>4.3 Parsing Strategy</h3>
+
+<ul><li><strong>Regex rules</strong> – Define patterns for carduploader format; handle common variations.</li><li><strong>Fallback</strong> – If regex fails, set <code>parse_confidence</code> low and <code>match_status = 'MANUAL_REVIEW'</code>.</li><li><strong>master_cards lookup</strong> – Use <code>set_abbr</code> + <code>num</code> + <code>lang</code> to resolve <code>card_name</code> from <code>master_cards</code> when possible.</li></ul>
+
+<hr>
+
+<h2>5. Data Model</h2>
+
+<h3>5.1 New Tables</h3>
+
+<h4>`ebay_sales` (sale records)</h4>
+
+<table>
+<tr><th>Column</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>id</code></td><td>uuid PK</td><td></td></tr>
+<tr><td><code>ebay_order_id</code></td><td>text</td><td></td></tr>
+<tr><td><code>ebay_line_item_id</code></td><td>text UNIQUE</td><td>Dedupe key</td></tr>
+<tr><td><code>ebay_item_id</code></td><td>text</td><td>Listing ID (for image fetch)</td></tr>
+<tr><td><code>ebay_sku</code></td><td>text</td><td>Only for auctions</td></tr>
+<tr><td><code>title</code></td><td>text</td><td>Raw title</td></tr>
+<tr><td><code>quantity</code></td><td>int</td><td>Usually 1</td></tr>
+<tr><td><code>sale_price</code></td><td>numeric</td><td>AUD</td></tr>
+<tr><td><code>currency</code></td><td>text</td><td>AUD</td></tr>
+<tr><td><code>sold_date</code></td><td>date</td><td></td></tr>
+<tr><td><code>buyer_username</code></td><td>text</td><td></td></tr>
+<tr><td><code>fulfillment_status</code></td><td>text</td><td>NOT_STARTED \</td><td>IN_PROGRESS \</td><td>FULFILLED</td></tr>
+<tr><td><code>image_url</code></td><td>text</td><td>Primary listing image (from eBay if available)</td></tr>
+<tr><td><strong>Parsed</strong></td><td></td><td></td></tr>
+<tr><td><code>card_name</code></td><td>text</td><td></td></tr>
+<tr><td><code>set_abbr</code></td><td>text</td><td></td></tr>
+<tr><td><code>num</code></td><td>text</td><td></td></tr>
+<tr><td><code>set_num</code></td><td>text</td><td></td></tr>
+<tr><td><code>set_name</code></td><td>text</td><td></td></tr>
+<tr><td><code>lang</code></td><td>text</td><td></td></tr>
+<tr><td><code>grade</code></td><td>text</td><td></td></tr>
+<tr><td><code>grading_company</code></td><td>text</td><td></td></tr>
+<tr><td><code>rarity</code></td><td>text</td><td></td></tr>
+<tr><td><code>card_game</code></td><td>text</td><td></td></tr>
+<tr><td><code>parse_confidence</code></td><td>numeric</td><td>0–1</td></tr>
+<tr><td><code>parse_flags</code></td><td>jsonb</td><td>Warnings</td></tr>
+<tr><td><strong>Matching</strong></td><td></td><td></td></tr>
+<tr><td><code>slab_id</code></td><td>uuid FK → slabs.id</td><td>Set by cert scan</td></tr>
+<tr><td><code>match_method</code></td><td>text</td><td>PARSED \</td><td>CERT_SCAN \</td><td>SKU (auctions only) \</td><td>MANUAL</td></tr>
+<tr><td><code>match_status</code></td><td>text</td><td>PENDING \</td><td>MATCHED \</td><td>UNMATCHED \</td><td>MANUAL_REVIEW</td></tr>
+<tr><td><code>matched_at</code></td><td>timestamptz</td><td>When cert was scanned</td></tr>
+<tr><td><strong>Metadata</strong></td><td></td><td></td></tr>
+<tr><td><code>created_at</code></td><td>timestamptz</td><td></td></tr>
+<tr><td><code>updated_at</code></td><td>timestamptz</td><td></td></tr>
+<tr><td><code>raw_response</code></td><td>jsonb</td><td>Optional</td></tr>
+</table>
+
+<h4>`ebay_sync_log`</h4>
+
+<table>
+<tr><th>Column</th><th>Type</th></tr>
+<tr><td><code>id</code></td><td>uuid PK</td></tr>
+<tr><td><code>started_at</code></td><td>timestamptz</td></tr>
+<tr><td><code>completed_at</code></td><td>timestamptz</td></tr>
+<tr><td><code>status</code></td><td>text</td></tr>
+<tr><td><code>orders_fetched</code></td><td>int</td></tr>
+<tr><td><code>sales_created</code></td><td>int</td></tr>
+<tr><td><code>sales_matched</code></td><td>int</td></tr>
+<tr><td><code>error_message</code></td><td>text</td></tr>
+</table>
+
+<h4>`ebay_refund_requests` (for approval flow)</h4>
+
+<table>
+<tr><th>Column</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>id</code></td><td>uuid PK</td><td></td></tr>
+<tr><td><code>ebay_sale_id</code></td><td>uuid FK</td><td></td></tr>
+<tr><td><code>slab_id</code></td><td>uuid FK</td><td></td></tr>
+<tr><td><code>reason</code></td><td>text</td><td>Cancellation/refund reason</td></tr>
+<tr><td><code>status</code></td><td>text</td><td>PENDING \</td><td>APPROVED \</td><td>REJECTED</td></tr>
+<tr><td><code>requested_at</code></td><td>timestamptz</td><td></td></tr>
+<tr><td><code>resolved_at</code></td><td>timestamptz</td><td></td></tr>
+<tr><td><code>resolved_by</code></td><td>text</td><td></td></tr>
+</table>
+
+<h3>5.2 Slabs Table Changes</h3>
+
+<table>
+<tr><th>Column</th><th>Type</th><th>Description</th></tr>
+<tr><td><code>sale_price</code></td><td>numeric</td><td><strong>NEW</strong></td></tr>
+<tr><td><code>sale_currency</code></td><td>text</td><td><strong>NEW</strong> – AUD</td></tr>
+<tr><td><code>ebay_sale_id</code></td><td>uuid FK → ebay_sales.id</td><td><strong>NEW</strong></td></tr>
+</table>
+
+<hr>
+
+<h2>6. Matching Strategy</h2>
+
+<h3>6.1 Match Priority (no SKU for most listings)</h3>
+
+<p>1. <strong>Cert scan (primary)</strong> – User scans cert; match <code>slabs.cert</code> → set <code>slab_id</code>, <code>match_method = 'CERT_SCAN'</code>.</p>
+<p>2. <strong>SKU (auctions only)</strong> – If <code>ebay_sku</code> present and matches <code>slabs.sku</code>, auto-match.</p>
+<p>3. <strong>Parsed identity</strong> – Suggest matches from <code>set_abbr</code> + <code>num</code> + <code>lang</code> + <code>grade</code> + <code>grading_company</code>; user confirms or scans.</p>
+<p>4. <strong>Manual</strong> – User selects slab from search/dropdown.</p>
+
+<h3>6.2 Rules</h3>
+
+<ul><li>Only match slabs with <code>sales_status = 'LISTED'</code>.</li><li>Cert scan is the approval step – no auto-match from parsing alone (except SKU for auctions).</li><li>When matched: update <code>slabs.sold_date</code>, <code>slabs.sale_price</code>, <code>slabs.ebay_sale_id</code>; set <code>ebay_sales.slab_id</code>, <code>match_status = 'MATCHED'</code>, <code>matched_at</code>.</li></ul>
+
+<hr>
+
+<h2>7. UI – Separate Frontend</h2>
+
+<p><strong>Decision:</strong> Separate frontend app for clarity (e.g. <code>ebay-sales-ui/</code> or similar).</p>
+
+<h3>7.1 Packing List Tab</h3>
+
+<p><strong>Replaces:</strong> eBay &quot;Awaiting postage&quot; tab.</p>
+
+<p><strong>Data source:</strong> <code>ebay_sales</code> where <code>fulfillment_status IN ('NOT_STARTED', 'IN_PROGRESS')</code>, ordered by <code>sold_date</code>.</p>
+
+<p><strong>Display per row:</strong></p>
+
+<table>
+<tr><th>Column</th><th>Source</th></tr>
+<tr><td>Image</td><td><code>image_url</code> or eBay listing image via <code>ebay_item_id</code></td></tr>
+<tr><td>Card name</td><td><code>card_name</code> (parsed) or from <code>master_cards</code></td></tr>
+<tr><td>Cert</td><td>Empty until matched; show &quot;—&quot; or &quot;Scan to match&quot;</td></tr>
+<tr><td>Grade</td><td><code>grade</code></td></tr>
+<tr><td>Set</td><td><code>set_abbr</code> / <code>set_name</code></td></tr>
+<tr><td>Buyer</td><td><code>buyer_username</code></td></tr>
+<tr><td>Sale price</td><td><code>sale_price</code></td></tr>
+</table>
+
+<p><strong>Actions:</strong></p>
+
+<ul><li>Filter by date, fulfillment status.</li><li>Optional: &quot;Sync from eBay&quot; to refresh.</li><li>Focus on <strong>cert</strong> column for barcode scanning (see Manual Match).</li></ul>
+
+<p><strong>Layout:</strong> Card grid or table; mobile-friendly for use during packing.</p>
+
+<h3>7.2 Manual Match Page</h3>
+
+<p><strong>Purpose:</strong> Match certs (from barcode scan) to sales. Acts as manual approval.</p>
+
+<p><strong>Layout:</strong></p>
+
+<ul><li>List of <strong>unmatched sales</strong> (<code>match_status = 'PENDING'</code> or <code>'MANUAL_REVIEW'</code>), ordered by <code>sold_date</code>.</li><li><strong>Barcode input field</strong> – Focused, large, accepts cert scan. On scan:</li></ul>
+<p>  1. Look up <code>slabs</code> where <code>cert = &lt;scanned_value&gt;</code> and <code>sales_status = 'LISTED'</code>.</p>
+<p>  2. If single match: auto-link to current/selected sale, update both, show success.</p>
+<p>  3. If multiple/no match: show message, allow manual slab search.</p>
+<ul><li><strong>Editable fields</strong> – Sale row: parsed card name, set, grade (editable if wrong). Slab: show matched slab details.</li><li><strong>Match button</strong> – Manual match when user selects slab from dropdown/search.</li></ul>
+
+<p><strong>Flow:</strong></p>
+
+<p>1. User opens Manual Match page.</p>
+<p>2. Sees list of sales needing match.</p>
+<p>3. Clicks/focuses barcode input.</p>
+<p>4. Scans cert on slab.</p>
+<p>5. System matches to sale (or prompts for selection).</p>
+<p>6. Repeat.</p>
+
+<h3>7.3 Sales Inbox (optional list view)</h3>
+
+<ul><li>All <code>ebay_sales</code> with filters: date, <code>match_status</code>, <code>fulfillment_status</code>.</li><li>Columns: sold_date, title, sale_price, match_status, slab (if matched), fulfillment_status.</li><li>Link to Manual Match for unmatched rows.</li></ul>
+
+<h3>7.4 Refund / Cancellation Approval Page</h3>
+
+<p><strong>Purpose:</strong> Before reverting slab status on refund/cancel.</p>
+
+<p><strong>Flow:</strong></p>
+
+<p>1. Detect refund/cancellation (eBay API or manual entry).</p>
+<p>2. Create <code>ebay_refund_requests</code> row with status <code>PENDING</code>.</p>
+<p>3. Approval page lists pending requests.</p>
+<p>4. User reviews: slab, sale, reason.</p>
+<p>5. Approve → revert slab (<code>sold_date</code> = null, <code>sale_price</code> = null, <code>ebay_sale_id</code> = null); mark sale/refund record.</p>
+<p>6. Reject → no change to slab.</p>
+
+<hr>
+
+<h2>8. Architecture</h2>
+
+<h3>8.1 Components</h3>
+
+<pre><code>┌─────────────────┐     ┌──────────────────┐     ┌─────────────────┐
+│  eBay API       │     │  eBay Sales      │     │  Supabase       │
+│  (Fulfillment)  │────▶│  Intake Service  │────▶│  ebay_sales,    │
+│  eBay AU        │     │  - Fetch orders  │     │  slabs,         │
+│                 │     │  - Parse titles  │     │  master_cards   │
+└─────────────────┘     │  - Store sales   │     └─────────────────┘
+                        └──────────────────┘
+                                 │
+                                 ▼
+                        ┌──────────────────┐
+                        │  Cron / Manual   │
+                        │  Sync trigger    │
+                        └──────────────────┘
+
+┌─────────────────┐
+│  eBay Sales UI  │  ← Separate frontend
+│  - Packing List │
+│  - Manual Match │
+│  - Refund Approve│
+└─────────────────┘</code></pre>
+
+<h3>8.2 Placement</h3>
+
+<ul><li><strong>Backend:</strong> <code>ebay-sales/</code> – Node/Express or Next.js API, shared Supabase.</li><li><strong>Frontend:</strong> Separate app (e.g. <code>ebay-sales-ui/</code>), same auth (Supabase Auth).</li></ul>
+
+<h3>8.3 Sync Flow</h3>
+
+<p>1. Cron or manual trigger.</p>
+<p>2. Fetch orders from eBay (filter: <code>creationdate</code> from last sync, or <code>orderFulfillmentStatus</code> for awaiting postage).</p>
+<p>3. Dedupe by <code>ebay_line_item_id</code>.</p>
+<p>4. Parse each new line item title (carduploader format) → normalized fields.</p>
+<p>5. Store in <code>ebay_sales</code>; do <strong>not</strong> auto-match to slabs (except SKU for auctions).</p>
+<p>6. Log <code>ebay_sync_log</code>.</p>
+
+<hr>
+
+<h2>9. API / Job Design</h2>
+
+<table>
+<tr><th>Method</th><th>Path</th><th>Description</th></tr>
+<tr><td>POST</td><td><code>/jobs/sync-ebay</code></td><td>Sync from eBay (CRON_SECRET)</td></tr>
+<tr><td>GET</td><td><code>/sales</code></td><td>List sales (filters: date, match_status, fulfillment_status)</td></tr>
+<tr><td>GET</td><td><code>/sales/packing</code></td><td>Sales awaiting shipment (NOT_STARTED, IN_PROGRESS)</td></tr>
+<tr><td>GET</td><td><code>/sales/:id</code></td><td>Sale detail + suggested slabs</td></tr>
+<tr><td>PATCH</td><td><code>/sales/:id/match</code></td><td>Set <code>slab_id</code> by cert or manual</td></tr>
+<tr><td>POST</td><td><code>/sales/match-by-cert</code></td><td>Body: <code>{ cert, sale_id }</code> – match by scanned cert</td></tr>
+<tr><td>GET</td><td><code>/refunds/pending</code></td><td>Pending refund requests</td></tr>
+<tr><td>POST</td><td><code>/refunds/:id/approve</code></td><td>Approve revert</td></tr>
+<tr><td>POST</td><td><code>/refunds/:id/reject</code></td><td>Reject</td></tr>
+</table>
+
+<hr>
+
+<h2>10. Fees (Low Priority)</h2>
+
+<ul><li>Use <strong>Sell Finances API</strong> <code>getTransactions</code> if straightforward.</li><li>Store fee/payout data on <code>ebay_sales</code> or separate table when added.</li><li>No built-in fee calculator required for MVP.</li></ul>
+
+<hr>
+
+<h2>11. Security &amp; Secrets</h2>
+
+<table>
+<tr><th>Secret</th><th>Purpose</th></tr>
+<tr><td><code>EBAY_APP_ID</code></td><td>eBay app ID</td></tr>
+<tr><td><code>EBAY_CERT_ID</code></td><td>eBay cert ID</td></tr>
+<tr><td><code>EBAY_REFRESH_TOKEN</code></td><td>OAuth (eBay AU seller)</td></tr>
+<tr><td><code>EBAY_ENVIRONMENT</code></td><td><code>production</code></td></tr>
+<tr><td><code>CRON_SECRET</code></td><td>Protect sync</td></tr>
+<tr><td><code>SUPABASE_URL</code>, <code>SUPABASE_SERVICE_ROLE_KEY</code></td><td>DB</td></tr>
+</table>
+
+<hr>
+
+<h2>12. Migration Order</h2>
+
+<p>1. <code>010_ebay_sales_tables.sql</code> – <code>ebay_sales</code>, <code>ebay_sync_log</code>, <code>ebay_refund_requests</code></p>
+<p>2. <code>011_slabs_sale_fields.sql</code> – Add <code>sale_price</code>, <code>sale_currency</code>, <code>ebay_sale_id</code> to <code>slabs</code></p>
+<p>3. Recreate <code>slabs_dashboard</code> / <code>slabs_enriched</code> views</p>
+
+<hr>
+
+<h2>13. Phased Rollout</h2>
+
+<table>
+<tr><th>Phase</th><th>Scope</th></tr>
+<tr><td><strong>Phase 1</strong></td><td>Fetch orders, parse titles (carduploader), store in <code>ebay_sales</code>, no slab updates</td></tr>
+<tr><td><strong>Phase 2</strong></td><td>Packing List UI – show awaiting shipment with image, card name, cert placeholder</td></tr>
+<tr><td><strong>Phase 3</strong></td><td>Manual Match page – barcode input, cert → slab match, update slabs</td></tr>
+<tr><td><strong>Phase 4</strong></td><td>Refund approval page, Finances API (fees)</td></tr>
+<tr><td><strong>Phase 5</strong></td><td>SKU support for auctions (optional)</td></tr>
+</table>
+
+<hr>
+
+<h2>14. Execution Checklist for Agent</h2>
+
+<ul><li>[ ] Create <code>ebay-sales/</code> backend (Node/Express or Next.js API)</li><li>[ ] eBay OAuth + Fulfillment API client</li><li>[ ] Title parser for carduploader format (regex + fallbacks)</li><li>[ ] Migrations: <code>ebay_sales</code>, <code>ebay_sync_log</code>, <code>ebay_refund_requests</code>, slabs columns</li><li>[ ] Sync job: fetch, parse, store</li><li>[ ] API: <code>/sales</code>, <code>/sales/packing</code>, <code>/sales/:id/match</code>, <code>/sales/match-by-cert</code></li><li>[ ] Create separate frontend app</li><li>[ ] Packing List page – awaiting shipment, image, card name, cert</li><li>[ ] Manual Match page – barcode input, cert scan → match</li><li>[ ] Refund approval page (Phase 4)</li><li>[ ] Cron for sync</li><li>[ ] Auth: Supabase Auth, same as existing apps</li></ul>
+
+</body>
+</html>

@@ -1,0 +1,25 @@
+{
+  "slabs": {
+    "table": "slabs_dashboard",
+    "columns": {
+      "id": "id",
+      "sku": "sku",
+      "cert": "cert",
+      "set_abbr": "set_abbr",
+      "num": "num",
+      "lang": "lang",
+      "card_name": "card_name",
+      "grade": "grade",
+      "order_number": "order_number",
+      "grading_order_id": "grading_order_id"
+    }
+  },
+  "matching": {
+    "cert": { "slab_column": "cert" },
+    "order_number": { "slab_column": "order_number" },
+    "set_num_lang": { "slab_columns": ["set_abbr", "num", "lang"] }
+  },
+  "lang_normalize": {
+    "EN": "ENG"
+  }
+}

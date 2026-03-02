@@ -1,0 +1,14 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    @apply antialiased;
+  }
+  body {
+    @apply text-slate-200 font-sans;
+    background: linear-gradient(180deg, #0a0e17 0%, #0f172a 30%, #0c1222 70%, #0a0e17 100%);
+    min-height: 100vh;
+  }
+}

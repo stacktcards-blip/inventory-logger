@@ -1,0 +1,13 @@
+# OS
+.DS_Store
+
+# IDE / Editor
+.cursor/
+
+# Environment (secrets)
+.env
+.env.local
+.env.*.local
+
+# Dependencies
+node_modules/
