@@ -1,4 +1,5 @@
 import express from 'express';
+import { z } from 'zod';
 const { Router } = express;
 import { getByCertNumber } from '../services/psaCertClient.js';
 import { psaCertToSlabDraft } from '../adapters/psaCertToSlabDraft.js';
@@ -13,6 +14,24 @@ import {
 import { commitSlabIntakeDraft } from '../services/slabIntakeCommitService.js';
 
 export const slabIntakeRouter = Router();
+
+const draftStatusSchema = z.enum(['pending', 'approved', 'committed', 'rejected']);
+const slabDraftUpdateSchema = z.object({
+  grade: z.string().nullable().optional(),
+  set_abbr: z.string().nullable().optional(),
+  num: z.string().nullable().optional(),
+  lang: z.string().nullable().optional(),
+  grading_company: z.string().nullable().optional(),
+  card_name: z.string().nullable().optional(),
+  is_1ed: z.boolean().nullable().optional(),
+  is_rev: z.boolean().nullable().optional(),
+  note: z.string().nullable().optional(),
+  order_number: z.string().nullable().optional(),
+  acquired_date: z.string().nullable().optional(),
+  image_url: z.string().url().nullable().optional(),
+}).strict();
+
+const actorForRequest = (req: express.Request) => req.user?.email ?? req.user?.id ?? 'unknown';
 
 /** POST /slab-intake/fetch – body: { certNumber: string } */
 slabIntakeRouter.post('/fetch', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
@@ -66,8 +85,13 @@ slabIntakeRouter.post('/fetch', async (req: express.Request, res: express.Respon
 /** GET /slab-intake/drafts?status=pending */
 slabIntakeRouter.get('/drafts', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
-    const status = (req.query.status as string) ?? 'pending';
-    const drafts = await listDraftsByStatus(status);
+    const parsed = draftStatusSchema.safeParse(req.query.status ?? 'pending');
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid draft status' });
+      return;
+    }
+
+    const drafts = await listDraftsByStatus(parsed.data);
     res.json({ data: drafts });
   } catch (err) {
     next(err);
@@ -87,16 +111,13 @@ slabIntakeRouter.get('/drafts/:id', async (req: express.Request, res: express.Re
 /** PATCH /slab-intake/drafts/:id */
 slabIntakeRouter.patch('/drafts/:id', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
-    const updates = req.body ?? {};
-    const allowed = [
-      'grade', 'set_abbr', 'num', 'lang', 'grading_company', 'card_name',
-      'is_1ed', 'is_rev', 'note', 'order_number', 'acquired_date', 'image_url',
-    ];
-    const filtered: Record<string, unknown> = {};
-    for (const k of allowed) {
-      if (k in updates) filtered[k] = updates[k];
+    const parsed = slabDraftUpdateSchema.safeParse(req.body ?? {});
+    if (!parsed.success) {
+      res.status(400).json({ error: 'Invalid slab intake draft update', details: parsed.error.flatten() });
+      return;
     }
-    const draft = await updateDraft(req.params.id, filtered);
+
+    const draft = await updateDraft(req.params.id, parsed.data);
     res.json({ data: draft });
   } catch (err) {
     next(err);
@@ -126,7 +147,7 @@ slabIntakeRouter.post('/drafts/:id/reject', async (req: express.Request, res: ex
 /** POST /slab-intake/drafts/:id/commit – body: { committed_by?: string } */
 slabIntakeRouter.post('/drafts/:id/commit', async (req: express.Request, res: express.Response, next: express.NextFunction) => {
   try {
-    const committedBy = req.body?.committed_by ?? 'unknown';
+    const committedBy = actorForRequest(req);
     const result = await commitSlabIntakeDraft(req.params.id, committedBy);
     res.json({ data: result });
   } catch (err) {

@@ -461,11 +461,14 @@ Mounted routes:
 
 ### Backend Environment Variables
 
-Required for Supabase service-role access:
+Required for Supabase service-role access and backend auth:
 
 ```txt
 SUPABASE_URL
-SUPABASE_SERVICE_ROLE_KEY
+SUPABASE_ANON_KEY          # verifies frontend Supabase JWTs
+SUPABASE_SERVICE_ROLE_KEY  # service-role DB access; server-side only
+ALLOWED_USER_IDS           # comma-separated Supabase user IDs
+# or ALLOWED_USER_EMAILS
 ```
 
 Required for Gmail ingest/parsing:
@@ -481,7 +484,7 @@ Server config:
 
 ```txt
 PORT=4000
-CORS_ORIGIN=*
+CORS_ORIGIN=http://localhost:5173
 ```
 
 PSA cert lookup:
