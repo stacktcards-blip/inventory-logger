@@ -32,7 +32,11 @@ npm install
 Create a `.env` file (or export env vars) with:
 ```
 SUPABASE_URL=...
-SUPABASE_SERVICE_ROLE_KEY=...
+SUPABASE_ANON_KEY=...              # used to verify frontend Supabase JWTs
+SUPABASE_SERVICE_ROLE_KEY=...      # server-side only; never expose to frontend
+ALLOWED_USER_IDS=...               # comma-separated Supabase auth user IDs
+# ALLOWED_USER_EMAILS=you@example.com,burton@example.com
+# ALLOW_ANY_AUTHENTICATED_USER=true # development only; do not use in production
 GMAIL_CLIENT_ID=...
 GMAIL_CLIENT_SECRET=...
 GMAIL_REFRESH_TOKEN=...
@@ -40,9 +44,18 @@ GMAIL_REDIRECT_URI=urn:ietf:wg:oauth:2.0:oob
 PORT=4000
 # Optional: for Slab Intake (PSA cert lookup)
 PSA_API_TOKEN=...   # or PSA_API_KEY – get from https://www.psacard.com/publicapi
-CORS_ORIGIN=*       # or your frontend origin, e.g. http://localhost:5173
+CORS_ORIGIN=http://localhost:5173  # set this explicitly in production
 ```
-Frontend: set `VITE_API_URL=http://localhost:4000` (or your Express URL) so the Slab Intake page can call the backend.
+Frontend: set `VITE_API_URL=http://localhost:4000` (or your Express URL) so the Slab Intake page can call the backend. The frontend forwards the logged-in Supabase access token to the backend automatically.
+
+### Backend security
+All API routes except `/healthz` require a valid Supabase user access token in:
+```
+Authorization: Bearer SUPABASE_ACCESS_TOKEN
+```
+The backend then checks `ALLOWED_USER_IDS` / `ALLOWED_USER_EMAILS` before using the service-role Supabase client. This protects service-role-backed routes from being called by unauthorised users.
+
+Do not run the backend in production with `ALLOW_ANY_AUTHENTICATED_USER=true`, and do not leave `CORS_ORIGIN` unset in production.
 
 ### 3) Supabase migrations
 Run the SQL in `migrations/001_create_purchase_tables.sql` and `migrations/002_commit_purchase_source.sql` in Supabase.
@@ -79,7 +92,7 @@ POST /jobs/parse-pending
 - `PATCH /slab-intake/drafts/:id`
 - `POST /slab-intake/drafts/:id/approve`
 - `POST /slab-intake/drafts/:id/reject`
-- `POST /slab-intake/drafts/:id/commit` – body `{ committed_by? }`
+- `POST /slab-intake/drafts/:id/commit` – commit approved draft to slabs; actor is derived from authenticated user
 
 ## Parser Notes
 - Vendor detection uses `src/config/japanStores.ts` (sender domain + subject keywords).
