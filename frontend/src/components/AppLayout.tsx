@@ -38,6 +38,7 @@ export function AppLayout() {
             {navLink('/grading-orders', 'Grading Orders')}
             {navLink('/raw-cards', 'Raw Cards', true)}
             {navLink('/raw-cards/add', 'Add raw cards', true)}
+            {navLink('/sales-packing', 'Sales Packing')}
           </nav>
           <div className="flex items-center gap-4">
             <span className="text-xs text-slate-500">{user?.email}</span>
