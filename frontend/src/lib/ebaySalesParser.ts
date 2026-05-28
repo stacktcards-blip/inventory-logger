@@ -171,6 +171,30 @@ function buildWarnings(row: Omit<EbaySalesItemRow, 'warnings'>): string[] {
   return warnings
 }
 
+export function buildSalesPackingSummary(
+  itemRows: EbaySalesItemRow[],
+  expandedRows: SalesPackingRow[]
+): EbaySalesParseSummary {
+  const orderNumbers = new Set(expandedRows.map((row) => row.orderNumber).filter(Boolean))
+  const includedItemKeys = new Set(
+    expandedRows.map((row) => `${row.salesRecordNumber}|${row.orderNumber}|${row.itemNumber}`)
+  )
+  const itemRowCount = itemRows.filter((row) =>
+    includedItemKeys.has(`${row.salesRecordNumber}|${row.orderNumber}|${row.itemNumber}`)
+  ).length
+
+  return {
+    orderCount: orderNumbers.size,
+    itemRowCount,
+    expandedRowCount: expandedRows.length,
+    totalSoldExPostage: expandedRows.reduce((sum, row) => sum + (row.soldFor ?? 0), 0),
+    missingSkuCount: expandedRows.filter((row) => row.warnings.includes('Missing SKU/custom label')).length,
+    highValueMissingSkuCount: expandedRows.filter((row) => row.warnings.includes('High-value sale missing SKU/custom label')).length,
+    combinedOrderItemCount: expandedRows.filter((row) => row.combinedOrder).length,
+    multiQuantityExpandedCount: expandedRows.filter((row) => row.quantity > 1).length,
+  }
+}
+
 export function parseEbaySalesCsv(text: string): EbaySalesParseResult {
   const records = toRecords(text)
   const itemRows: EbaySalesItemRow[] = []
@@ -224,25 +248,10 @@ export function parseEbaySalesCsv(text: string): EbaySalesParseResult {
     }))
   })
 
-  const orderNumbers = new Set(itemRows.map((row) => row.orderNumber).filter(Boolean))
-  const totalSoldExPostage = itemRows.reduce(
-    (sum, row) => sum + (row.soldFor ?? 0) * row.quantity,
-    0
-  )
-
   return {
     itemRows,
     expandedRows,
-    summary: {
-      orderCount: orderNumbers.size,
-      itemRowCount: itemRows.length,
-      expandedRowCount: expandedRows.length,
-      totalSoldExPostage,
-      missingSkuCount: expandedRows.filter((row) => row.warnings.includes('Missing SKU/custom label')).length,
-      highValueMissingSkuCount: expandedRows.filter((row) => row.warnings.includes('High-value sale missing SKU/custom label')).length,
-      combinedOrderItemCount: expandedRows.filter((row) => row.combinedOrder).length,
-      multiQuantityExpandedCount: expandedRows.filter((row) => row.quantity > 1).length,
-    },
+    summary: buildSalesPackingSummary(itemRows, expandedRows),
   }
 }
 

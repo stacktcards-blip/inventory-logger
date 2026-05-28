@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { test } from 'node:test'
 
 import {
+  buildSalesPackingSummary,
   exportSalesPackingRowsCsv,
   parseEbaySalesCsv,
 } from '../src/lib/ebaySalesParser'
@@ -64,4 +65,17 @@ test('exports expanded sales packing rows as CSV', () => {
   assert.match(csv, /cert scanned\/manual,scan status,warnings/)
   assert.match(csv, /1 of 3/)
   assert.match(csv, /Quantity 3 expanded into cert scan rows/)
+})
+
+test('recalculates summary and export from included rows after non-slab rows are removed', () => {
+  const result = parseEbaySalesCsv(sampleCsv)
+  const includedRows = result.expandedRows.filter((row) => row.itemNumber !== '406471933275')
+  const summary = buildSalesPackingSummary(result.itemRows, includedRows)
+  const csv = exportSalesPackingRowsCsv(includedRows)
+
+  assert.equal(summary.expandedRowCount, 5)
+  assert.equal(summary.totalSoldExPostage, 3830)
+  assert.equal(summary.combinedOrderItemCount, 1)
+  assert.doesNotMatch(csv, /Team Rocket's Meowth/)
+  assert.match(csv, /Mega Gengar EX/)
 })
