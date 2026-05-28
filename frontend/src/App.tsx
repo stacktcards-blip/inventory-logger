@@ -8,6 +8,7 @@ import { GradingOrdersPage } from './pages/GradingOrdersPage'
 import { RawCardsPage } from './pages/RawCardsPage'
 import { AddRawCardsPage } from './pages/AddRawCardsPage'
 import { SlabIntakePage } from './pages/SlabIntakePage'
+import { SalesPackingPage } from './pages/SalesPackingPage'
 
 function App() {
   return (
@@ -27,6 +28,7 @@ function App() {
           <Route path="grading-orders" element={<GradingOrdersPage />} />
           <Route path="raw-cards" element={<RawCardsPage />} />
           <Route path="raw-cards/add" element={<AddRawCardsPage />} />
+          <Route path="sales-packing" element={<SalesPackingPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
