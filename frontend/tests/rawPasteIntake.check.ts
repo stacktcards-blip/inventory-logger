@@ -28,6 +28,8 @@ test('parses tab-separated pasted spreadsheet rows without headers', () => {
     num: '201',
     lang: 'JP',
     purchase_price: '280',
+    exchange_rate: '',
+    seller: '',
     cond: '',
     quantity: '1',
     note: '',
@@ -37,6 +39,8 @@ test('parses tab-separated pasted spreadsheet rows without headers', () => {
     num: '202',
     lang: '',
     purchase_price: '420',
+    exchange_rate: '',
+    seller: '',
     cond: 'LP',
     quantity: '2',
     note: 'minor edge',
@@ -52,6 +56,8 @@ test('parses headered paste rows in flexible column order', () => {
       num: '025',
       lang: '',
       purchase_price: '1200',
+      exchange_rate: '',
+      seller: '',
       cond: '',
       quantity: '3',
       note: 'master ball',
@@ -61,7 +67,19 @@ test('parses headered paste rows in flexible column order', () => {
 
 test('applies batch defaults without overwriting explicit row values', () => {
   const [row] = applyIntakeDefaults(
-    [{ set_abbr: 'sv8a', num: '202', lang: '', purchase_price: '420', cond: 'LP', quantity: '1', note: '' }],
+    [
+      {
+        set_abbr: 'sv8a',
+        num: '202',
+        lang: '',
+        purchase_price: '420',
+        exchange_rate: '',
+        seller: '',
+        cond: 'LP',
+        quantity: '1',
+        note: '',
+      },
+    ],
     defaults
   )
 
@@ -73,9 +91,35 @@ test('applies batch defaults without overwriting explicit row values', () => {
   assert.equal(row.exchange_rate, '0.0102')
 })
 
+test('parses spreadsheet exports with name, exchange rate, and seller columns', () => {
+  const pasted = [
+    'NAME\tSET\tNUM\tLANG\tPrice\tExch\tSeller',
+    "Team Rocket's Mewtwo ex\tSV10\t125\tJPN\t58000\t0.009147\tHareruya",
+  ].join('\n')
+
+  const parsed = parsePastedRawRows(pasted)
+  assert.deepEqual(parsed, [
+    {
+      set_abbr: 'SV10',
+      num: '125',
+      lang: 'JPN',
+      purchase_price: '58000',
+      exchange_rate: '0.009147',
+      seller: 'Hareruya',
+      cond: '',
+      quantity: '1',
+      note: '',
+    },
+  ])
+
+  const [row] = applyIntakeDefaults(parsed, defaults)
+  assert.equal(row.exchange_rate, '0.009147')
+  assert.equal(row.seller, 'Hareruya')
+})
+
 test('expands quantity into individual raw card draft rows', () => {
   const rows = applyIntakeDefaults(
-    [{ set_abbr: 'sv8a', num: '202', lang: '', purchase_price: '420', cond: '', quantity: '3', note: 'test' }],
+    [{ set_abbr: 'sv8a', num: '202', lang: '', purchase_price: '420', exchange_rate: '', seller: '', cond: '', quantity: '3', note: 'test' }],
     defaults
   )
 
@@ -89,9 +133,9 @@ test('expands quantity into individual raw card draft rows', () => {
 test('validates required fields, JPY exchange rate, bad price, and duplicate batch rows', () => {
   const rows = applyIntakeDefaults(
     [
-      { set_abbr: 'sv8a', num: '201', lang: '', purchase_price: 'abc', cond: '', quantity: '1', note: '' },
-      { set_abbr: 'sv8a', num: '201', lang: '', purchase_price: '280', cond: '', quantity: '1', note: '' },
-      { set_abbr: '', num: '202', lang: '', purchase_price: '280', cond: '', quantity: '0', note: '' },
+      { set_abbr: 'sv8a', num: '201', lang: '', purchase_price: 'abc', exchange_rate: '', seller: '', cond: '', quantity: '1', note: '' },
+      { set_abbr: 'sv8a', num: '201', lang: '', purchase_price: '280', exchange_rate: '', seller: '', cond: '', quantity: '1', note: '' },
+      { set_abbr: '', num: '202', lang: '', purchase_price: '280', exchange_rate: '', seller: '', cond: '', quantity: '0', note: '' },
     ],
     { ...defaults, exchange_rate: '' }
   )
@@ -108,8 +152,8 @@ test('validates required fields, JPY exchange rate, bad price, and duplicate bat
 test('summarises ready rows and estimated AUD cost', () => {
   const rows = applyIntakeDefaults(
     [
-      { set_abbr: 'sv8a', num: '201', lang: '', purchase_price: '100', cond: '', quantity: '2', note: '' },
-      { set_abbr: '', num: '202', lang: '', purchase_price: '100', cond: '', quantity: '1', note: '' },
+      { set_abbr: 'sv8a', num: '201', lang: '', purchase_price: '100', exchange_rate: '', seller: '', cond: '', quantity: '2', note: '' },
+      { set_abbr: '', num: '202', lang: '', purchase_price: '100', exchange_rate: '', seller: '', cond: '', quantity: '1', note: '' },
     ],
     defaults
   )
