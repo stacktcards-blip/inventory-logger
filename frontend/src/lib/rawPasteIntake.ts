@@ -14,6 +14,8 @@ export type ParsedPasteRawRow = {
   num: string
   lang: string
   purchase_price: string
+  exchange_rate: string
+  seller: string
   cond: string
   quantity: string
   note: string
@@ -54,6 +56,16 @@ const HEADER_ALIASES: Record<string, keyof ParsedPasteRawRow> = {
   unit_price: 'purchase_price',
   purchaseprice: 'purchase_price',
   purchase_price: 'purchase_price',
+  exch: 'exchange_rate',
+  exchange: 'exchange_rate',
+  exchangerate: 'exchange_rate',
+  exchange_rate: 'exchange_rate',
+  fx: 'exchange_rate',
+  fxrate: 'exchange_rate',
+  seller: 'seller',
+  source: 'seller',
+  vendor: 'seller',
+  supplier: 'seller',
   cond: 'cond',
   condition: 'cond',
   qty: 'quantity',
@@ -68,6 +80,8 @@ function blankParsedRow(): ParsedPasteRawRow {
     num: '',
     lang: '',
     purchase_price: '',
+    exchange_rate: '',
+    seller: '',
     cond: '',
     quantity: '1',
     note: '',
@@ -145,8 +159,8 @@ export function applyIntakeDefaults(rows: ParsedPasteRawRow[], defaults: RawInta
     card_name: null,
     currency: defaults.currency.trim(),
     purchase_price: row.purchase_price.trim(),
-    exchange_rate: defaults.exchange_rate.trim(),
-    seller: defaults.seller.trim(),
+    exchange_rate: row.exchange_rate.trim() || defaults.exchange_rate.trim(),
+    seller: row.seller.trim() || defaults.seller.trim(),
     purchase_date: defaults.purchase_date,
     cond: row.cond.trim() || defaults.cond.trim(),
     note: row.note.trim(),
