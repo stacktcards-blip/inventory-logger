@@ -1,5 +1,6 @@
 import { useMemo, useState } from 'react'
 import {
+  buildSalesPackingSummary,
   exportSalesPackingRowsCsv,
   formatAud,
   parseEbaySalesCsv,
@@ -25,6 +26,7 @@ function rowKey(row: SalesPackingRow, index: number) {
 export function SalesPackingPage() {
   const [csvText, setCsvText] = useState('')
   const [certValues, setCertValues] = useState<Record<string, string>>({})
+  const [removedRowKeys, setRemovedRowKeys] = useState<Set<string>>(new Set())
 
   const parsed = useMemo(() => {
     if (!csvText.trim()) return { result: null, error: null }
@@ -38,15 +40,26 @@ export function SalesPackingPage() {
 
   const rowsWithCerts = useMemo(() => {
     if (!result) return []
-    return result.expandedRows.map((row, index) => {
-      const cert = certValues[rowKey(row, index)]?.trim() ?? ''
-      return {
-        ...row,
-        certScanned: cert,
-        scanStatus: cert ? 'scanned' as const : 'pending' as const,
-      }
-    })
-  }, [certValues, result])
+    return result.expandedRows
+      .map((row, index) => ({ row, index, key: rowKey(row, index) }))
+      .filter(({ key }) => !removedRowKeys.has(key))
+      .map(({ row, key }) => {
+        const cert = certValues[key]?.trim() ?? ''
+        return {
+          ...row,
+          rowKey: key,
+          certScanned: cert,
+          scanStatus: cert ? 'scanned' as const : 'pending' as const,
+        }
+      })
+  }, [certValues, removedRowKeys, result])
+
+  const activeSummary = useMemo(() => {
+    if (!result) return null
+    return buildSalesPackingSummary(result.itemRows, rowsWithCerts)
+  }, [result, rowsWithCerts])
+
+  const removedRowCount = result ? removedRowKeys.size : 0
 
   const warningCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -60,6 +73,7 @@ export function SalesPackingPage() {
     if (!file) return
     setCsvText(await file.text())
     setCertValues({})
+    setRemovedRowKeys(new Set())
   }
 
   const handleExport = () => {
@@ -111,6 +125,7 @@ export function SalesPackingPage() {
               onChange={(e) => {
                 setCsvText(e.target.value)
                 setCertValues({})
+                setRemovedRowKeys(new Set())
               }}
               placeholder="Paste eBay Paid & Posted CSV here..."
               rows={6}
@@ -125,18 +140,32 @@ export function SalesPackingPage() {
         )}
       </div>
 
-      {result && (
+      {result && activeSummary && (
         <>
-          <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-8">
-            <Metric label="Orders" value={result.summary.orderCount} />
-            <Metric label="Item rows" value={result.summary.itemRowCount} />
-            <Metric label="Packing rows" value={result.summary.expandedRowCount} />
-            <Metric label="Sold ex postage" value={formatAud(result.summary.totalSoldExPostage)} />
-            <Metric label="Missing SKU" value={result.summary.missingSkuCount} tone={result.summary.missingSkuCount ? 'warn' : 'default'} />
-            <Metric label="High-value no SKU" value={result.summary.highValueMissingSkuCount} tone={result.summary.highValueMissingSkuCount ? 'danger' : 'default'} />
-            <Metric label="Combined rows" value={result.summary.combinedOrderItemCount} tone={result.summary.combinedOrderItemCount ? 'warn' : 'default'} />
-            <Metric label="Multi-qty rows" value={result.summary.multiQuantityExpandedCount} tone={result.summary.multiQuantityExpandedCount ? 'warn' : 'default'} />
+          <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-9">
+            <Metric label="Orders" value={activeSummary.orderCount} />
+            <Metric label="Item rows" value={activeSummary.itemRowCount} />
+            <Metric label="Packing rows" value={activeSummary.expandedRowCount} />
+            <Metric label="Removed rows" value={removedRowCount} tone={removedRowCount ? 'warn' : 'default'} />
+            <Metric label="Sold ex postage" value={formatAud(activeSummary.totalSoldExPostage)} />
+            <Metric label="Missing SKU" value={activeSummary.missingSkuCount} tone={activeSummary.missingSkuCount ? 'warn' : 'default'} />
+            <Metric label="High-value no SKU" value={activeSummary.highValueMissingSkuCount} tone={activeSummary.highValueMissingSkuCount ? 'danger' : 'default'} />
+            <Metric label="Combined rows" value={activeSummary.combinedOrderItemCount} tone={activeSummary.combinedOrderItemCount ? 'warn' : 'default'} />
+            <Metric label="Multi-qty rows" value={activeSummary.multiQuantityExpandedCount} tone={activeSummary.multiQuantityExpandedCount ? 'warn' : 'default'} />
           </div>
+
+          {removedRowCount > 0 && (
+            <div className="flex items-center justify-between rounded-lg border border-slate-700/70 bg-slate-900/60 px-3 py-2 text-xs text-slate-300">
+              <span>{removedRowCount} non-slab / unwanted packing row{removedRowCount === 1 ? '' : 's'} removed from this working view and export.</span>
+              <button
+                type="button"
+                onClick={() => setRemovedRowKeys(new Set())}
+                className="rounded-md border border-base-border bg-base-elevated px-2 py-1 font-medium text-slate-300 hover:bg-base-elevated/80 hover:text-slate-100"
+              >
+                Restore removed rows
+              </button>
+            </div>
+          )}
 
           {warningCounts.length > 0 && (
             <div className="rounded-lg border border-amber-800/50 bg-amber-950/20 p-3 text-xs text-amber-100">
@@ -155,7 +184,7 @@ export function SalesPackingPage() {
             <table className="min-w-full divide-y divide-base-border/60">
               <thead className="bg-gradient-to-b from-slate-800/80 to-slate-900/60">
                 <tr>
-                  {['Cert', 'Status', 'Qty', 'Buyer', 'Sale date', 'Title', 'SKU', 'Sold', 'Order', 'Tracking', 'Warnings'].map((header) => (
+                  {['Remove', 'Cert', 'Status', 'Qty', 'Buyer', 'Sale date', 'Title', 'SKU', 'Sold', 'Order', 'Tracking', 'Warnings'].map((header) => (
                     <th key={header} className="px-3 py-2 text-left text-2xs font-semibold uppercase tracking-wider text-slate-500">
                       {header}
                     </th>
@@ -163,10 +192,20 @@ export function SalesPackingPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-base-border/60">
-                {rowsWithCerts.map((row, index) => {
-                  const key = rowKey(row, index)
+                {rowsWithCerts.map((row) => {
+                  const key = row.rowKey
                   return (
                     <tr key={key} className="transition-colors hover:bg-base-elevated/50">
+                      <td className="px-3 py-2">
+                        <button
+                          type="button"
+                          title="Remove this row from the slab packing view"
+                          onClick={() => setRemovedRowKeys((current) => new Set(current).add(key))}
+                          className="rounded-md border border-red-900/60 bg-red-950/30 px-2 py-1 text-xs font-semibold text-red-300 transition-colors hover:bg-red-900/40 hover:text-red-100"
+                        >
+                          ×
+                        </button>
+                      </td>
                       <td className="px-3 py-2">
                         <input
                           value={certValues[key] ?? ''}
@@ -196,6 +235,11 @@ export function SalesPackingPage() {
                 })}
               </tbody>
             </table>
+            {rowsWithCerts.length === 0 && (
+              <div className="px-4 py-8 text-center text-sm text-slate-500">
+                All imported rows have been removed from the slab packing view. Restore rows above or paste/upload the CSV again.
+              </div>
+            )}
           </div>
         </>
       )}
