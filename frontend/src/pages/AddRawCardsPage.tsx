@@ -1,5 +1,14 @@
-import { useState, useCallback, useEffect, useRef } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
+import {
+  applyIntakeDefaults,
+  expandQuantityRows,
+  getIntakeSummary,
+  parsePastedRawRows,
+  validateIntakeRows,
+  type RawIntakeDefaults,
+  type RawIntakeRow,
+} from '../lib/rawPasteIntake'
 import { supabase } from '../lib/supabase'
 import type { RawCardDraftRow } from '../types/rawCards'
 
@@ -94,7 +103,7 @@ function downloadTemplate() {
   URL.revokeObjectURL(url)
 }
 
-const emptyRow = (): RawCardDraftRow => ({
+const emptyRow = (): RawIntakeRow => ({
   set_abbr: '',
   num: '',
   lang: '',
@@ -108,6 +117,16 @@ const emptyRow = (): RawCardDraftRow => ({
   note: '',
   is_1ed: false,
   is_rev: false,
+  quantity: '1',
+})
+
+const defaultIntakeDefaults = (): RawIntakeDefaults => ({
+  seller: '',
+  purchase_date: new Date().toISOString().slice(0, 10),
+  currency: 'JPY',
+  exchange_rate: '',
+  lang: 'JP',
+  cond: 'NM',
 })
 
 const CARD_NAME_DEBOUNCE_MS = 400
@@ -115,12 +134,17 @@ const CARD_NAME_DEBOUNCE_MS = 400
 export function AddRawCardsPage() {
   const navigate = useNavigate()
   const fileInputRef = useRef<HTMLInputElement>(null)
-  const [rows, setRows] = useState<RawCardDraftRow[]>(() => [emptyRow()])
+  const [rows, setRows] = useState<RawIntakeRow[]>(() => [emptyRow()])
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [successCount, setSuccessCount] = useState<number | null>(null)
   const [dragOver, setDragOver] = useState(false)
   const [importError, setImportError] = useState<string | null>(null)
+  const [pasteText, setPasteText] = useState('')
+  const [pasteError, setPasteError] = useState<string | null>(null)
+  const [defaults, setDefaults] = useState<RawIntakeDefaults>(() => defaultIntakeDefaults())
+  const validations = useMemo(() => validateIntakeRows(rows), [rows])
+  const summary = useMemo(() => getIntakeSummary(rows, validations), [rows, validations])
 
   const lookupCardName = useCallback(
     async (setAbbr: string, num: string, lang: string): Promise<string | null> => {
@@ -138,7 +162,7 @@ export function AddRawCardsPage() {
     []
   )
 
-  const updateRow = useCallback((index: number, updates: Partial<RawCardDraftRow>) => {
+  const updateRow = useCallback((index: number, updates: Partial<RawIntakeRow>) => {
     setRows((prev) =>
       prev.map((r, i) => {
         if (i !== index) return r
@@ -198,7 +222,7 @@ export function AddRawCardsPage() {
           setImportError('CSV has no data rows or could not be parsed.')
           return
         }
-        const drafts = parsed.map(csvRowToDraft)
+        const drafts = parsed.map(csvRowToDraft).map((draft) => ({ ...draft, quantity: '1' }))
         setRows(drafts.length > 0 ? drafts : [emptyRow()])
       } catch (e) {
         setImportError(e instanceof Error ? e.message : 'Failed to parse CSV.')
@@ -239,18 +263,34 @@ export function AddRawCardsPage() {
     [processFile]
   )
 
-  const approveAll = async () => {
-    const valid = rows.filter(
-      (r) => r.set_abbr.trim() && r.num.trim() && r.lang.trim()
-    )
-    if (valid.length === 0) {
-      setError('Add at least one row with Set, Num and Lang.')
+  const handleApplyPaste = useCallback(() => {
+    setPasteError(null)
+    setError(null)
+    setSuccessCount(null)
+    const parsed = parsePastedRawRows(pasteText)
+    if (parsed.length === 0) {
+      setPasteError('Paste at least one row from a spreadsheet.')
       return
     }
+    setRows(applyIntakeDefaults(parsed, defaults))
+  }, [defaults, pasteText])
+
+  const updateDefault = useCallback((key: keyof RawIntakeDefaults, value: string) => {
+    setDefaults((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  const approveAll = async () => {
+    const validationResults = validateIntakeRows(rows)
+    const valid = rows.filter((_, index) => validationResults[index]?.errors.length === 0)
+    if (valid.length === 0) {
+      setError('Fix validation errors before approving rows.')
+      return
+    }
+    const expandedRows = expandQuantityRows(valid)
     setSaving(true)
     setError(null)
     setSuccessCount(null)
-    const payloads = valid.map((r) => ({
+    const payloads = expandedRows.map((r) => ({
       set_abbr: r.set_abbr.trim() || null,
       num: r.num.trim() || null,
       lang: r.lang.trim() || null,
@@ -332,6 +372,82 @@ export function AddRawCardsPage() {
         </div>
       )}
 
+      {pasteError && (
+        <div className="rounded-md border border-amber-900/50 bg-amber-950/30 p-3 text-sm text-amber-300">
+          {pasteError}
+        </div>
+      )}
+
+      <section className="rounded-lg border border-base-border/80 bg-base-elevated/30 p-4 shadow-lg shadow-black/10">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-100">Paste intake MVP</h2>
+            <p className="text-xs text-slate-500">
+              Set batch defaults once, paste rows from Google Sheets, then review/commit below.
+            </p>
+          </div>
+          <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-400 sm:grid-cols-5">
+            <span>Source: <strong className="text-slate-200">{summary.sourceRows}</strong></span>
+            <span>Commit: <strong className="text-slate-200">{summary.commitRows}</strong></span>
+            <span>Ready: <strong className="text-emerald-300">{summary.readyRows}</strong></span>
+            <span>Warnings: <strong className="text-amber-300">{summary.warningRows}</strong></span>
+            <span>Errors: <strong className="text-red-300">{summary.errorRows}</strong></span>
+          </div>
+        </div>
+
+        <div className="grid gap-3 md:grid-cols-6">
+          <label className="space-y-1 text-2xs font-medium uppercase tracking-wide text-slate-500">
+            Seller
+            <input className={inputClass} value={defaults.seller} onChange={(e) => updateDefault('seller', e.target.value)} placeholder="Card Rush" />
+          </label>
+          <label className="space-y-1 text-2xs font-medium uppercase tracking-wide text-slate-500">
+            Date
+            <input className={inputClass} type="date" value={defaults.purchase_date} onChange={(e) => updateDefault('purchase_date', e.target.value)} />
+          </label>
+          <label className="space-y-1 text-2xs font-medium uppercase tracking-wide text-slate-500">
+            Currency
+            <input className={inputClass} value={defaults.currency} onChange={(e) => updateDefault('currency', e.target.value.toUpperCase())} placeholder="JPY" />
+          </label>
+          <label className="space-y-1 text-2xs font-medium uppercase tracking-wide text-slate-500">
+            Exch
+            <input className={inputClass} inputMode="decimal" value={defaults.exchange_rate} onChange={(e) => updateDefault('exchange_rate', e.target.value)} placeholder="0.0102" />
+          </label>
+          <label className="space-y-1 text-2xs font-medium uppercase tracking-wide text-slate-500">
+            Lang
+            <input className={inputClass} value={defaults.lang} onChange={(e) => updateDefault('lang', e.target.value.toUpperCase())} placeholder="JP" />
+          </label>
+          <label className="space-y-1 text-2xs font-medium uppercase tracking-wide text-slate-500">
+            Cond
+            <input className={inputClass} value={defaults.cond} onChange={(e) => updateDefault('cond', e.target.value.toUpperCase())} placeholder="NM" />
+          </label>
+        </div>
+
+        <div className="mt-3 grid gap-3 lg:grid-cols-[1fr_auto]">
+          <textarea
+            value={pasteText}
+            onChange={(e) => setPasteText(e.target.value)}
+            rows={5}
+            className="w-full rounded border border-base-border bg-slate-950/50 px-3 py-2 font-mono text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+            placeholder={'Paste rows: Set\tNum\tLang\tPrice\tCond\tQty\tNote\nsv8a\t201\tJP\t280\tNM\t1'}
+          />
+          <div className="flex flex-col gap-2">
+            <button
+              type="button"
+              onClick={handleApplyPaste}
+              className="rounded-lg bg-gradient-to-r from-blue-600 to-blue-500 px-4 py-2 text-xs font-medium text-white shadow-lg shadow-blue-500/20 hover:from-blue-500 hover:to-blue-400"
+            >
+              Parse paste into grid
+            </button>
+            <span className="max-w-xs text-2xs text-slate-500">
+              Supports tabs or CSV. Header row optional. Default order: Set, Num, Lang, Price, Cond, Qty, Note.
+            </span>
+            <span className="text-2xs text-slate-500">
+              Est. AUD cost: <strong className="text-slate-300">{summary.estimatedAudCost === null ? '—' : `$${summary.estimatedAudCost.toFixed(2)}`}</strong>
+            </span>
+          </div>
+        </div>
+      </section>
+
       <div
         onDrop={onDrop}
         onDragOver={onDragOver}
@@ -364,6 +480,9 @@ export function AddRawCardsPage() {
           <thead>
             <tr>
               <th className={thClass} style={{ width: 40 }} />
+              <th className={thClass} style={{ minWidth: 88 }}>
+                Status
+              </th>
               <th className={thClass} style={{ minWidth: 80 }}>
                 Set
               </th>
@@ -395,6 +514,9 @@ export function AddRawCardsPage() {
                 Cond
               </th>
               <th className={thClass} style={{ minWidth: 56 }}>
+                Qty
+              </th>
+              <th className={thClass} style={{ minWidth: 56 }}>
                 1ed
               </th>
               <th className={thClass} style={{ minWidth: 56 }}>
@@ -406,7 +528,17 @@ export function AddRawCardsPage() {
             </tr>
           </thead>
           <tbody className="divide-y divide-base-border/60">
-            {rows.map((row, index) => (
+            {rows.map((row, index) => {
+              const validation = validations[index] ?? { errors: [], warnings: [] }
+              const statusLabel = validation.errors.length > 0 ? 'Error' : validation.warnings.length > 0 ? 'Warn' : 'Ready'
+              const statusClass =
+                validation.errors.length > 0
+                  ? 'border-red-900/60 bg-red-950/40 text-red-300'
+                  : validation.warnings.length > 0
+                    ? 'border-amber-900/60 bg-amber-950/40 text-amber-300'
+                    : 'border-emerald-900/60 bg-emerald-950/40 text-emerald-300'
+              const statusTitle = [...validation.errors, ...validation.warnings].join('\n') || 'Ready to commit'
+              return (
               <tr key={index} className="hover:bg-base-elevated/30">
                 <td className="px-2 py-1.5">
                   <button
@@ -418,6 +550,11 @@ export function AddRawCardsPage() {
                   >
                     ✕
                   </button>
+                </td>
+                <td className="px-2 py-1.5">
+                  <span className={`inline-flex rounded-full border px-2 py-0.5 text-2xs font-semibold ${statusClass}`} title={statusTitle}>
+                    {statusLabel}
+                  </span>
                 </td>
                 <td className="px-2 py-1.5">
                   <input
@@ -508,6 +645,16 @@ export function AddRawCardsPage() {
                 </td>
                 <td className="px-2 py-1.5">
                   <input
+                    type="text"
+                    inputMode="numeric"
+                    value={row.quantity}
+                    onChange={(e) => updateRow(index, { quantity: e.target.value })}
+                    placeholder="1"
+                    className={inputClass}
+                  />
+                </td>
+                <td className="px-2 py-1.5">
+                  <input
                     type="checkbox"
                     checked={row.is_1ed}
                     onChange={(e) => updateRow(index, { is_1ed: e.target.checked })}
@@ -532,7 +679,8 @@ export function AddRawCardsPage() {
                   />
                 </td>
               </tr>
-            ))}
+              )
+            })}
           </tbody>
         </table>
       </div>
