@@ -131,6 +131,8 @@ test('builds sales packing import payload with one item row and one packing row 
     '2 of 3',
     '3 of 3',
   ])
+  assert.equal('raw_item_json' in payload.itemRows[0], true)
+  assert.equal('raw_item_json' in payload.packingRows[0], false)
 })
 
 test('converts saved packing rows back into visible sales packing rows', () => {

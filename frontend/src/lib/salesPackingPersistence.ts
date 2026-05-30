@@ -33,7 +33,7 @@ export type SalesPackingItemInsert = {
   raw_item_json: EbaySalesItemRow
 }
 
-export type SalesPackingRowInsert = SalesPackingItemInsert & {
+export type SalesPackingRowInsert = Omit<SalesPackingItemInsert, 'raw_item_json'> & {
   quantity_unit: string
   cert_scanned: string
   scan_status: 'pending' | 'scanned'
@@ -115,14 +115,17 @@ export function buildSalesPackingImportPayload(
       raw_csv_text: options.csvText ?? null,
     },
     itemRows: itemRows.map(itemInsert),
-    packingRows: packingRows.map((row) => ({
-      ...itemInsert(row),
-      quantity_unit: row.quantityUnit,
-      cert_scanned: row.certScanned,
-      scan_status: row.certScanned.trim() ? 'scanned' : 'pending',
-      removed: false,
-      removed_reason: null,
-    })),
+    packingRows: packingRows.map((row) => {
+      const { raw_item_json: _rawItemJson, ...insertRow } = itemInsert(row)
+      return {
+        ...insertRow,
+        quantity_unit: row.quantityUnit,
+        cert_scanned: row.certScanned,
+        scan_status: row.certScanned.trim() ? 'scanned' : 'pending',
+        removed: false,
+        removed_reason: null,
+      }
+    }),
   }
 }
 

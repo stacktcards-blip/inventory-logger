@@ -70,6 +70,7 @@ export function SalesPackingPage() {
     const { data, error } = await supabase
       .from('sales_packing_imports')
       .select('id, uploaded_at, source_filename, row_count, expanded_row_count, order_count, total_sold_ex_postage, status')
+      .neq('status', 'cancelled')
       .order('uploaded_at', { ascending: false })
       .limit(12)
 
@@ -213,6 +214,29 @@ export function SalesPackingPage() {
     }
   }
 
+  const deleteSavedImport = async (importRow: SalesPackingImportSummary) => {
+    const label = importRow.source_filename || 'Pasted CSV'
+    const confirmed = window.confirm(`Delete saved packing session "${label}"? This hides the draft and its packing rows from the saved drafts list.`)
+    if (!confirmed) return
+
+    setPersistenceError(null)
+    setPersistenceMessage(null)
+    const { error } = await supabase
+      .from('sales_packing_imports')
+      .update({ status: 'cancelled', updated_at: new Date().toISOString() })
+      .eq('id', importRow.id)
+    if (error) {
+      setPersistenceError(error.message)
+      return
+    }
+
+    setSavedImports((current) => current.filter((item) => item.id !== importRow.id))
+    if (activeImport?.id === importRow.id) {
+      clearWorkingCsv()
+    }
+    setPersistenceMessage('Deleted saved packing session.')
+  }
+
   const loadSavedImport = async (importRow: SalesPackingImportSummary) => {
     setIsLoadingImport(true)
     setPersistenceError(null)
@@ -316,17 +340,30 @@ export function SalesPackingPage() {
         {savedImports.length ? (
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {savedImports.map((item) => (
-              <button
+              <div
                 key={item.id}
-                type="button"
-                disabled={isLoadingImport}
-                onClick={() => void loadSavedImport(item)}
-                className={`rounded-lg border px-3 py-2 text-left text-xs transition-colors ${activeImport?.id === item.id ? 'border-blue-500/60 bg-blue-950/30 text-blue-100' : 'border-base-border bg-base-elevated/60 text-slate-300 hover:bg-base-elevated'}`}
+                className={`relative rounded-lg border transition-colors ${activeImport?.id === item.id ? 'border-blue-500/60 bg-blue-950/30 text-blue-100' : 'border-base-border bg-base-elevated/60 text-slate-300 hover:bg-base-elevated'}`}
               >
-                <div className="font-semibold text-slate-100">{item.source_filename || 'Pasted CSV'}</div>
-                <div className="mt-1 text-slate-400">{new Date(item.uploaded_at).toLocaleString()} · {item.expanded_row_count} rows · {item.status}</div>
-                <div className="mt-1 text-slate-500">Orders: {item.order_count} · Sold: {formatAud(Number(item.total_sold_ex_postage ?? 0))}</div>
-              </button>
+                <button
+                  type="button"
+                  disabled={isLoadingImport}
+                  onClick={() => void loadSavedImport(item)}
+                  className="block w-full px-3 py-2 pr-9 text-left text-xs"
+                >
+                  <div className="font-semibold text-slate-100">{item.source_filename || 'Pasted CSV'}</div>
+                  <div className="mt-1 text-slate-400">{new Date(item.uploaded_at).toLocaleString()} · {item.expanded_row_count} rows · {item.status}</div>
+                  <div className="mt-1 text-slate-500">Orders: {item.order_count} · Sold: {formatAud(Number(item.total_sold_ex_postage ?? 0))}</div>
+                </button>
+                <button
+                  type="button"
+                  title="Delete saved packing session"
+                  aria-label={`Delete saved packing session ${item.source_filename || 'Pasted CSV'}`}
+                  onClick={() => void deleteSavedImport(item)}
+                  className="absolute right-2 top-2 rounded-full border border-red-900/60 bg-red-950/40 px-1.5 py-0.5 text-xs font-semibold text-red-300 transition-colors hover:bg-red-900/60 hover:text-red-100"
+                >
+                  ×
+                </button>
+              </div>
             ))}
           </div>
         ) : (
