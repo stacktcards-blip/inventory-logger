@@ -6,6 +6,7 @@ import {
   exportSalesPackingRowsCsv,
   parseEbaySalesCsv,
 } from '../src/lib/ebaySalesParser'
+import { findNextSalesPackingScanKey } from '../src/lib/salesPackingScan'
 
 const sampleCsv = `
 "Sales Record Number","Order Number","Buyer Username","Item Number","Item Title","Custom Label","Quantity","Sold For","Postage And Handling","Total Price","Sale Date","Tracking Number"
@@ -49,12 +50,34 @@ test('flags missing SKU, high-value missing SKU, combined orders, and multi-quan
   assert.equal(multi.every((row) => row.warnings.includes('Quantity 3 expanded into cert scan rows')), true)
 })
 
+test('orders sales packing rows by ascending order number', () => {
+  const result = parseEbaySalesCsv(sampleCsv)
+
+  assert.deepEqual(result.expandedRows.map((row) => row.orderNumber), [
+    '01-14701-30101',
+    '01-14701-30101',
+    '04-14689-12345',
+    '04-14689-12345',
+    '04-14689-12345',
+    '16-14679-61003',
+  ])
+})
+
 test('creates blank cert scan fields and pending scan status for packing', () => {
   const result = parseEbaySalesCsv(sampleCsv)
   const row = result.expandedRows[0]
 
   assert.equal(row.certScanned, '')
   assert.equal(row.scanStatus, 'pending')
+})
+
+test('finds the next cert scan row after the current row', () => {
+  const keys = ['row-a', 'row-b', 'row-c']
+
+  assert.equal(findNextSalesPackingScanKey(keys, 'row-a'), 'row-b')
+  assert.equal(findNextSalesPackingScanKey(keys, 'row-b'), 'row-c')
+  assert.equal(findNextSalesPackingScanKey(keys, 'row-c'), null)
+  assert.equal(findNextSalesPackingScanKey(keys, 'missing'), 'row-a')
 })
 
 test('exports expanded sales packing rows as CSV', () => {

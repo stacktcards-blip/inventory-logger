@@ -239,7 +239,13 @@ export function parseEbaySalesCsv(text: string): EbaySalesParseResult {
     context = { ...mergedContext, combinedOrder }
   }
 
-  const expandedRows = itemRows.flatMap((row) => {
+  const sortedItemRows = [...itemRows].sort((a, b) => {
+    const orderDiff = a.orderNumber.localeCompare(b.orderNumber, undefined, { numeric: true })
+    if (orderDiff !== 0) return orderDiff
+    return itemRows.indexOf(a) - itemRows.indexOf(b)
+  })
+
+  const expandedRows = sortedItemRows.flatMap((row) => {
     return Array.from({ length: row.quantity }, (_, index): SalesPackingRow => ({
       ...row,
       quantityUnit: `${index + 1} of ${row.quantity}`,
@@ -249,9 +255,9 @@ export function parseEbaySalesCsv(text: string): EbaySalesParseResult {
   })
 
   return {
-    itemRows,
+    itemRows: sortedItemRows,
     expandedRows,
-    summary: buildSalesPackingSummary(itemRows, expandedRows),
+    summary: buildSalesPackingSummary(sortedItemRows, expandedRows),
   }
 }
 

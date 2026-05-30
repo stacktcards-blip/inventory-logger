@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useRef, useState } from 'react'
 import {
   buildSalesPackingSummary,
   exportSalesPackingRowsCsv,
@@ -6,6 +6,7 @@ import {
   parseEbaySalesCsv,
   type SalesPackingRow,
 } from '../lib/ebaySalesParser'
+import { findNextSalesPackingScanKey } from '../lib/salesPackingScan'
 
 function downloadTextFile(filename: string, content: string) {
   const blob = new Blob([content], { type: 'text/csv;charset=utf-8' })
@@ -27,6 +28,7 @@ export function SalesPackingPage() {
   const [csvText, setCsvText] = useState('')
   const [certValues, setCertValues] = useState<Record<string, string>>({})
   const [removedRowKeys, setRemovedRowKeys] = useState<Set<string>>(new Set())
+  const certInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const parsed = useMemo(() => {
     if (!csvText.trim()) return { result: null, error: null }
@@ -60,6 +62,16 @@ export function SalesPackingPage() {
   }, [result, rowsWithCerts])
 
   const removedRowCount = result ? removedRowKeys.size : 0
+  const visibleRowKeys = useMemo(() => rowsWithCerts.map((row) => row.rowKey), [rowsWithCerts])
+
+  const focusNextCertInput = (currentKey: string) => {
+    const nextKey = findNextSalesPackingScanKey(visibleRowKeys, currentKey)
+    if (!nextKey) return
+    requestAnimationFrame(() => {
+      certInputRefs.current[nextKey]?.focus()
+      certInputRefs.current[nextKey]?.select()
+    })
+  }
 
   const warningCounts = useMemo(() => {
     const counts = new Map<string, number>()
@@ -208,8 +220,16 @@ export function SalesPackingPage() {
                       </td>
                       <td className="px-3 py-2">
                         <input
+                          ref={(element) => {
+                            certInputRefs.current[key] = element
+                          }}
                           value={certValues[key] ?? ''}
                           onChange={(e) => setCertValues((current) => ({ ...current, [key]: e.target.value }))}
+                          onKeyDown={(e) => {
+                            if (e.key !== 'Enter') return
+                            e.preventDefault()
+                            focusNextCertInput(key)
+                          }}
                           placeholder="Scan cert"
                           className="w-32 rounded-md border border-base-border bg-base-elevated px-2 py-1 text-xs text-slate-100 placeholder:text-slate-600 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
                         />

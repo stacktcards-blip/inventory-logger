@@ -697,62 +697,45 @@ Recommended future improvement:
 - run `npm install` at repo root
 - commit generated root `package-lock.json` if the root backend remains active
 
-## Recommended Improvement Roadmap
+## Current Roadmap
 
-### 1. Raw-card intake validation
-
-Add review warnings before saving raw cards:
-
-- missing card-name match
-- missing condition
-- missing seller
-- missing purchase date
-- suspicious price
-- missing exchange rate for JPY
-- invalid currency
-- possible duplicate rows
-
-### 2. Faster inventory entry
-
-Improve `AddRawCardsPage` with:
-
-- paste from spreadsheet
-- bulk apply seller/date/currency/exchange rate
-- keyboard-first row entry
-- duplicate row action
-- auto-uppercase set/lang/currency
-- row-level validation badges
-
-### 3. Operations dashboard
-
-Create an inventory problems dashboard:
-
-- raw cards missing metadata
-- slabs not linked to raw cards
-- slabs listed but not sold after X days
-- possible duplicate raw cards
-- rows with missing/invalid costs
-- cards physically present but not listed
-
-### 4. eBay listing prep queue
-
-Future workflow:
+The live roadmap is now maintained in:
 
 ```txt
-raw_cards / slabs
-  -> listing candidate queue
-  -> title/description/price/photo checklist
-  -> eBay draft/export/upload
-  -> listed_date tracking
+docs/CURRENT_ROADMAP.md
 ```
 
-### 5. Stronger backend boundaries
+Short version:
 
-For business-critical writes, consider moving from browser-direct writes to:
+1. **Sales Packing V1.1** — improve packing-day scan ergonomics, keep rows sorted by ascending order number, support continuous barcode scanning, add progress/status polish, and preserve the CSV-first workflow.
+2. **Read-only cert validation** — when a cert is scanned, validate against Supabase that the slab exists, is not already sold, is eligible to ship, and has not been scanned twice in the same session. Do not write inventory state yet.
+3. **Controlled sold writeback** — once validation feels safe, use a backend endpoint or Supabase RPC to create/update `ebay_sales`, link the scanned slab, and mark the slab sold in one auditable transaction.
+4. **Inventory exceptions dashboard** — focus on problem queues: missing slab/raw links, missing cert/grade/cost data, sold slabs missing sale price, stale listed slabs, raw-card exchange-rate issues, and suspicious duplicates.
+5. **Lifecycle/status model** — later schema work to separate physical item identity, grading event history, physical location, listing status, sale/fulfilment status, and exception lanes such as cracking/regrade/ZNG.
 
-- backend endpoints
-- Supabase RPC functions
-- stricter validation and audit logging
+Recently shipped items that should no longer be treated as future roadmap:
+
+- spreadsheet-like raw-card paste intake;
+- raw-card validation/warning badges;
+- raw-card bulk edit;
+- CSV-first Sales Packing MVP with one cert-scan row per physical slab;
+- removal of non-slab/unwanted sales-packing rows.
+
+Deferred for now:
+
+- full eBay API sync;
+- eBay finance/fees API;
+- supplier-specific purchase parsers;
+- saved raw-card intake drafts.
+
+### Stronger backend boundaries
+
+For business-critical writes, especially future sold-writeback from Sales Packing, prefer:
+
+- backend endpoints;
+- Supabase RPC functions;
+- stricter validation;
+- audit logging / unwind path.
 
 This is especially relevant as more people/tools interact with the app.
 
