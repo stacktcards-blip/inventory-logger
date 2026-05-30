@@ -11,3 +11,8 @@
 
 # Dependencies
 node_modules/
+
+# Local/generated data exports
+/data/
+dist/
+build/
