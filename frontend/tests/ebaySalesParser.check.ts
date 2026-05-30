@@ -7,6 +7,7 @@ import {
   parseEbaySalesCsv,
 } from '../src/lib/ebaySalesParser'
 import { findNextSalesPackingScanKey } from '../src/lib/salesPackingScan'
+import { buildSalesPackingImportPayload, buildSalesPackingRowsFromSaved } from '../src/lib/salesPackingPersistence'
 
 const sampleCsv = `
 "Sales Record Number","Order Number","Buyer Username","Item Number","Item Title","Custom Label","Quantity","Sold For","Postage And Handling","Total Price","Sale Date","Tracking Number"
@@ -101,4 +102,67 @@ test('recalculates summary and export from included rows after non-slab rows are
   assert.equal(summary.combinedOrderItemCount, 1)
   assert.doesNotMatch(csv, /Team Rocket's Meowth/)
   assert.match(csv, /Mega Gengar EX/)
+})
+
+test('builds sales packing import payload with one item row and one packing row per physical item', () => {
+  const result = parseEbaySalesCsv(sampleCsv)
+  const rows = result.expandedRows.map((row, index) => ({
+    ...row,
+    rowKey: `${row.orderNumber}-${row.itemNumber}-${row.quantityUnit}-${index}`,
+  }))
+  const payload = buildSalesPackingImportPayload(result.itemRows, rows, {
+    filename: 'orders.csv',
+    csvText: sampleCsv,
+  })
+
+  assert.equal(payload.importRow.source_filename, 'orders.csv')
+  assert.equal(payload.importRow.row_count, 4)
+  assert.equal(payload.importRow.expanded_row_count, 6)
+  assert.equal(payload.itemRows.length, 4)
+  assert.equal(payload.packingRows.length, 6)
+  assert.deepEqual(payload.itemRows.map((row) => row.line_item_key), [
+    '01-14701-30101|12126|406471933275',
+    '01-14701-30101|12126|406802886617',
+    '04-14689-12345|12125|406999999999',
+    '16-14679-61003|12132|405358863537',
+  ])
+  assert.deepEqual(payload.packingRows.filter((row) => row.line_item_key === '04-14689-12345|12125|406999999999').map((row) => row.quantity_unit), [
+    '1 of 3',
+    '2 of 3',
+    '3 of 3',
+  ])
+})
+
+test('converts saved packing rows back into visible sales packing rows', () => {
+  const saved = buildSalesPackingRowsFromSaved([
+    {
+      id: 'packing-1',
+      line_item_key: 'order|record|item',
+      sale_date: '26-May-26',
+      buyer_username: 'buyer-one',
+      order_number: '16-14679-61003',
+      sales_record_number: '12132',
+      item_number: '405358863537',
+      listing_title: 'PSA 10 Haunter',
+      custom_label: '',
+      quantity: 1,
+      sold_for: 3000,
+      postage_and_handling: 13,
+      total_price: 3013,
+      tracking_number: 'TRACK',
+      combined_order: false,
+      warnings: ['Missing SKU/custom label'],
+      quantity_unit: '1 of 1',
+      cert_scanned: '12345678',
+      scan_status: 'scanned',
+      removed: false,
+      removed_reason: null,
+    },
+  ])
+
+  assert.equal(saved.length, 1)
+  assert.equal(saved[0].rowKey, 'packing-1')
+  assert.equal(saved[0].certScanned, '12345678')
+  assert.equal(saved[0].scanStatus, 'scanned')
+  assert.deepEqual(saved[0].warnings, ['Missing SKU/custom label'])
 })

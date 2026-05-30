@@ -45,6 +45,17 @@ Current stance: do not spend more here unless real intake batches expose frictio
 - Rows now sort by ascending order number for packing flow.
 - Pressing Enter after scanning a cert moves focus to the next visible cert field for continuous barcode scanning.
 
+## Current build: Sales Packing saved sessions MVP
+
+MVP 1 saves uploaded eBay CSV sales into Supabase without marking slabs sold:
+
+- `sales_packing_imports` stores one saved upload/session.
+- `sales_packing_item_rows` stores one row per eBay line item.
+- `sales_packing_rows` stores one row per physical packing/cert-scan item.
+- The Sales Packing page can reopen saved sessions.
+- Cert scans and removed rows persist to Supabase.
+- Inventory writeback is deliberately out of scope until cert validation is safe.
+
 ## Next build: Sales Packing V1.1
 
 This is the current highest-ROI area because it touches every packing day and can reduce cert/order mistakes.
@@ -53,8 +64,7 @@ This is the current highest-ROI area because it touches every packing day and ca
 
 - Keep cert inputs keyboard-first.
 - Add clearer focused/current-row styling.
-- Add scan progress summary: pending vs scanned.
-- Consider localStorage session persistence so a refresh does not wipe scans.
+- Continue improving scan progress summary: pending vs scanned.
 
 ### 2. Add read-only cert validation against Supabase
 
