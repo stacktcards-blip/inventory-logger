@@ -6,6 +6,7 @@
 
 # Environment (secrets)
 .env
+.env.save
 .env.local
 .env.*.local
 
