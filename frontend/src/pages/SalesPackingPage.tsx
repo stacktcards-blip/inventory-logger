@@ -8,6 +8,12 @@ import {
 } from '../lib/ebaySalesParser'
 import { findNextSalesPackingScanKey } from '../lib/salesPackingScan'
 import {
+  buildCertValidationMap,
+  normalizePackingCert,
+  validatePackingCert,
+  type CertValidationSlabRow,
+} from '../lib/salesPackingCertValidation'
+import {
   buildSalesPackingImportPayload,
   buildSalesPackingRowsFromSaved,
   type SalesPackingVisibleRow,
@@ -52,6 +58,8 @@ export function SalesPackingPage() {
   const [savedRows, setSavedRows] = useState<SavedSalesPackingRow[]>([])
   const [isSavingImport, setIsSavingImport] = useState(false)
   const [isLoadingImport, setIsLoadingImport] = useState(false)
+  const [validationRows, setValidationRows] = useState<CertValidationSlabRow[]>([])
+  const [validationError, setValidationError] = useState<string | null>(null)
   const [persistenceMessage, setPersistenceMessage] = useState<string | null>(null)
   const [persistenceError, setPersistenceError] = useState<string | null>(null)
   const certInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
@@ -105,6 +113,49 @@ export function SalesPackingPage() {
   }, [certValues, removedRowKeys, result])
 
   const rowsWithCerts = activeImport ? savedVisibleRows : parsedVisibleRows
+
+  const validationMap = useMemo(() => buildCertValidationMap(validationRows), [validationRows])
+  const scannedCertsForValidation = useMemo(
+    () => rowsWithCerts.map((row) => ({ rowKey: row.rowKey, cert: row.certScanned })),
+    [rowsWithCerts]
+  )
+  const validationByRowKey = useMemo(() => {
+    const entries = rowsWithCerts.map((row) => [
+      row.rowKey,
+      validatePackingCert(row.certScanned, row.rowKey, validationMap, scannedCertsForValidation),
+    ] as const)
+    return new Map(entries)
+  }, [rowsWithCerts, scannedCertsForValidation, validationMap])
+
+  useEffect(() => {
+    const certs = [...new Set(rowsWithCerts.map((row) => normalizePackingCert(row.certScanned)).filter(Boolean))]
+    if (!certs.length) {
+      setValidationRows([])
+      setValidationError(null)
+      return
+    }
+
+    let cancelled = false
+    const loadCertValidationRows = async () => {
+      const { data, error } = await supabase
+        .from('slabs_dashboard')
+        .select('*')
+        .in('cert', certs)
+      if (cancelled) return
+      if (error) {
+        setValidationRows([])
+        setValidationError(error.message)
+        return
+      }
+      setValidationRows((data ?? []) as CertValidationSlabRow[])
+      setValidationError(null)
+    }
+
+    void loadCertValidationRows()
+    return () => {
+      cancelled = true
+    }
+  }, [rowsWithCerts])
 
   const activeSummary = useMemo(() => {
     if (activeImport) {
@@ -246,7 +297,7 @@ export function SalesPackingPage() {
         .from('sales_packing_rows')
         .select('id, line_item_key, sale_date, buyer_username, order_number, sales_record_number, item_number, listing_title, custom_label, quantity, sold_for, postage_and_handling, total_price, tracking_number, combined_order, warnings, quantity_unit, cert_scanned, scan_status, removed, removed_reason')
         .eq('import_id', importRow.id)
-        .order('order_number', { ascending: true })
+        .order('sales_record_number', { ascending: true })
         .order('created_at', { ascending: true })
       if (error) throw error
 
@@ -441,6 +492,11 @@ export function SalesPackingPage() {
       {persistenceError && (
         <div className="rounded-md border border-red-900/60 bg-red-950/30 px-3 py-2 text-xs text-red-300">{persistenceError}</div>
       )}
+      {validationError && (
+        <div className="rounded-md border border-amber-900/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+          Read-only slab cert validation unavailable: {validationError}. Scanning still works; no slab inventory writes are performed.
+        </div>
+      )}
 
       {activeImport && (
         <div className="rounded-lg border border-blue-900/50 bg-blue-950/20 px-3 py-2 text-xs text-blue-100">
@@ -509,6 +565,7 @@ export function SalesPackingPage() {
               <tbody className="divide-y divide-base-border/60">
                 {rowsWithCerts.map((row) => {
                   const key = row.rowKey
+                  const validation = validationByRowKey.get(key)
                   return (
                     <tr key={key} className="transition-colors hover:bg-base-elevated/50">
                       <td className="px-3 py-2">
@@ -547,9 +604,21 @@ export function SalesPackingPage() {
                         />
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs">
-                        <span className={`rounded-full px-2 py-0.5 ${row.scanStatus === 'scanned' ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-800 text-slate-400'}`}>
-                          {row.scanStatus}
-                        </span>
+                        <div className="space-y-1">
+                          <span className={`rounded-full px-2 py-0.5 ${row.scanStatus === 'scanned' ? 'bg-emerald-900/40 text-emerald-300' : 'bg-slate-800 text-slate-400'}`}>
+                            {row.scanStatus}
+                          </span>
+                          {validation && validation.status !== 'empty' && (
+                            <div className={`max-w-[14rem] whitespace-normal rounded-md border px-2 py-1 ${validation.tone === 'good'
+                              ? 'border-emerald-800/50 bg-emerald-950/30 text-emerald-200'
+                              : validation.tone === 'danger'
+                                ? 'border-red-800/50 bg-red-950/30 text-red-200'
+                                : 'border-amber-800/50 bg-amber-950/30 text-amber-200'}`}
+                            >
+                              {validation.message}
+                            </div>
+                          )}
+                        </div>
                       </td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-200">{row.quantityUnit}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-200">{row.buyerUsername || '—'}</td>

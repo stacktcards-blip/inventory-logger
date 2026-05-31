@@ -9,6 +9,7 @@ import { RawCardsPage } from './pages/RawCardsPage'
 import { AddRawCardsPage } from './pages/AddRawCardsPage'
 import { SlabIntakePage } from './pages/SlabIntakePage'
 import { SalesPackingPage } from './pages/SalesPackingPage'
+import { SlabReconciliationPage } from './pages/SlabReconciliationPage'
 
 function App() {
   return (
@@ -25,6 +26,7 @@ function App() {
         >
           <Route index element={<SlabsPage />} />
           <Route path="slab-intake" element={<SlabIntakePage />} />
+          <Route path="slabs/reconciliation" element={<SlabReconciliationPage />} />
           <Route path="grading-orders" element={<GradingOrdersPage />} />
           <Route path="raw-cards" element={<RawCardsPage />} />
           <Route path="raw-cards/add" element={<AddRawCardsPage />} />

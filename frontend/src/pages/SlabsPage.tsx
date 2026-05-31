@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
-import { useSearchParams } from 'react-router-dom'
+import { Link, useSearchParams } from 'react-router-dom'
 import { useSlabs } from '../hooks/useSlabs'
 import { SlabsFilters } from '../components/SlabsFilters'
 import { SlabsStatsCards } from '../components/SlabsStatsCards'
@@ -86,9 +86,17 @@ export function SlabsPage() {
 
   return (
     <div className="space-y-3">
-      <h1 className="bg-gradient-to-r from-slate-100 via-slate-200 to-slate-300 bg-clip-text text-2xl font-semibold tracking-tight text-transparent">
-        Slabs Inventory
-      </h1>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <h1 className="bg-gradient-to-r from-slate-100 via-slate-200 to-slate-300 bg-clip-text text-2xl font-semibold tracking-tight text-transparent">
+          Slabs Inventory
+        </h1>
+        <Link
+          to="/slabs/reconciliation"
+          className="rounded-md border border-amber-700/50 bg-amber-900/20 px-3 py-2 text-xs font-medium text-amber-200 transition-colors hover:bg-amber-900/30"
+        >
+          Open Reconciliation Cockpit
+        </Link>
+      </div>
       <SlabsStatsCards
             stats={stats}
             loading={statsLoading}
