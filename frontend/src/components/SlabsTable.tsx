@@ -101,6 +101,7 @@ const baseColumns: ColumnDef<SlabsDashboardRow>[] = [
       const colors: Record<string, string> = {
         'NOT LISTED': 'bg-slate-700/60 text-slate-300',
         LISTED: 'bg-amber-900/50 text-amber-300',
+        'AWAITING AUCTION': 'bg-purple-900/50 text-purple-300',
         SOLD: 'bg-emerald-900/50 text-emerald-300',
       }
       return (

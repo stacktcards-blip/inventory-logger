@@ -18,13 +18,21 @@ export type SlabsDashboardRow = {
   acquired_date: string | null
   listed_date: string | null
   sold_date: string | null
+  listing_state: 'NOT_LISTED' | 'LISTED' | 'AWAITING_AUCTION' | null
+  acquisition_type: 'GRADED_BY_US' | 'PURCHASED_GRADED' | 'CONSIGNMENT' | 'UNKNOWN' | null
+  metadata_status: 'PARSED_CONFIRMED' | 'NEEDS_ENRICHMENT' | 'NEEDS_REVIEW' | 'PSA_METADATA_ONLY' | null
+  stock_source: 'PHYSICAL_STOCKTAKE' | 'PSA_STAGING' | 'MANUAL' | 'UNKNOWN' | null
+  source_psa_row_id: string | null
+  source_stocktake_scan_id: string | null
+  restocked_at: string | null
+  restock_reason: string | null
   grading_order_id: number | null
   raw_card_id: number | null
   raw_purchase_date: string | null
   raw_seller: string | null
   raw_cost_aud: number | null
-  sales_status: 'NOT LISTED' | 'LISTED' | 'SOLD'
-  slab_origin: 'GRADED_BY_US' | 'PURCHASED_SLAB' | 'UNKNOWN'
+  sales_status: 'NOT LISTED' | 'LISTED' | 'AWAITING AUCTION' | 'SOLD'
+  slab_origin: 'GRADED_BY_US' | 'PURCHASED_GRADED' | 'PURCHASED_SLAB' | 'CONSIGNMENT' | 'UNKNOWN'
   is_linked_to_raw: boolean
 }
 

@@ -51,6 +51,44 @@ type OrderContext = {
 
 const HIGH_VALUE_MISSING_SKU_THRESHOLD = 400
 
+function orderNumberParts(orderNumber: string): Array<number | string> {
+  return orderNumber
+    .trim()
+    .split(/([^0-9]+)/)
+    .filter(Boolean)
+    .map((part) => (/^\d+$/.test(part) ? Number(part) : part.toLowerCase()))
+}
+
+export function compareSalesPackingOrderNumbers(a: string, b: string): number {
+  const aParts = orderNumberParts(a)
+  const bParts = orderNumberParts(b)
+  const max = Math.max(aParts.length, bParts.length)
+
+  for (let i = 0; i < max; i += 1) {
+    const aPart = aParts[i]
+    const bPart = bParts[i]
+    if (aPart == null && bPart == null) return 0
+    if (aPart == null) return -1
+    if (bPart == null) return 1
+    if (aPart === bPart) continue
+    if (typeof aPart === 'number' && typeof bPart === 'number') return aPart - bPart
+    return String(aPart).localeCompare(String(bPart), undefined, { numeric: true })
+  }
+
+  return 0
+}
+
+export function compareSalesPackingRows(
+  a: Pick<EbaySalesItemRow, 'orderNumber' | 'salesRecordNumber' | 'itemNumber'>,
+  b: Pick<EbaySalesItemRow, 'orderNumber' | 'salesRecordNumber' | 'itemNumber'>
+): number {
+  const salesRecordDiff = a.salesRecordNumber.localeCompare(b.salesRecordNumber, undefined, { numeric: true })
+  if (salesRecordDiff !== 0) return salesRecordDiff
+  const orderDiff = compareSalesPackingOrderNumbers(a.orderNumber, b.orderNumber)
+  if (orderDiff !== 0) return orderDiff
+  return a.itemNumber.localeCompare(b.itemNumber, undefined, { numeric: true })
+}
+
 function parseCsv(text: string): string[][] {
   const rows: string[][] = []
   let row: string[] = []
@@ -239,11 +277,10 @@ export function parseEbaySalesCsv(text: string): EbaySalesParseResult {
     context = { ...mergedContext, combinedOrder }
   }
 
-  const sortedItemRows = [...itemRows].sort((a, b) => {
-    const orderDiff = a.orderNumber.localeCompare(b.orderNumber, undefined, { numeric: true })
-    if (orderDiff !== 0) return orderDiff
-    return itemRows.indexOf(a) - itemRows.indexOf(b)
-  })
+  const sortedItemRows = itemRows
+    .map((row, originalIndex) => ({ row, originalIndex }))
+    .sort((a, b) => compareSalesPackingRows(a.row, b.row) || a.originalIndex - b.originalIndex)
+    .map(({ row }) => row)
 
   const expandedRows = sortedItemRows.flatMap((row) => {
     return Array.from({ length: row.quantity }, (_, index): SalesPackingRow => ({

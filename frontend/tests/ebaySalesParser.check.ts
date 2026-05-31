@@ -51,17 +51,38 @@ test('flags missing SKU, high-value missing SKU, combined orders, and multi-quan
   assert.equal(multi.every((row) => row.warnings.includes('Quantity 3 expanded into cert scan rows')), true)
 })
 
-test('orders sales packing rows by ascending order number', () => {
+test('orders sales packing rows by ascending sales record number', () => {
   const result = parseEbaySalesCsv(sampleCsv)
 
+  assert.deepEqual(result.expandedRows.map((row) => row.salesRecordNumber), [
+    '12125',
+    '12125',
+    '12125',
+    '12126',
+    '12126',
+    '12132',
+  ])
   assert.deepEqual(result.expandedRows.map((row) => row.orderNumber), [
+    '04-14689-12345',
+    '04-14689-12345',
+    '04-14689-12345',
     '01-14701-30101',
     '01-14701-30101',
-    '04-14689-12345',
-    '04-14689-12345',
-    '04-14689-12345',
     '16-14679-61003',
   ])
+})
+
+test('sorts sales record numbers numerically instead of by order number', () => {
+  const csv = `
+"Sales Record Number","Order Number","Buyer Username","Item Number","Item Title","Custom Label","Quantity","Sold For","Postage And Handling","Total Price","Sale Date","Tracking Number"
+"10","1-1-1","buyer","item-10","Tenth","","1","AU $1.00","","","26-May-26",""
+"2","10-1-1","buyer","item-2","Second","","1","AU $1.00","","","26-May-26",""
+"1","2-1-1","buyer","item-1","First","","1","AU $1.00","","","26-May-26",""
+`
+  const result = parseEbaySalesCsv(csv)
+
+  assert.deepEqual(result.expandedRows.map((row) => row.salesRecordNumber), ['1', '2', '10'])
+  assert.deepEqual(result.expandedRows.map((row) => row.orderNumber), ['2-1-1', '10-1-1', '1-1-1'])
 })
 
 test('creates blank cert scan fields and pending scan status for packing', () => {
@@ -121,9 +142,9 @@ test('builds sales packing import payload with one item row and one packing row 
   assert.equal(payload.itemRows.length, 4)
   assert.equal(payload.packingRows.length, 6)
   assert.deepEqual(payload.itemRows.map((row) => row.line_item_key), [
+    '04-14689-12345|12125|406999999999',
     '01-14701-30101|12126|406471933275',
     '01-14701-30101|12126|406802886617',
-    '04-14689-12345|12125|406999999999',
     '16-14679-61003|12132|405358863537',
   ])
   assert.deepEqual(payload.packingRows.filter((row) => row.line_item_key === '04-14689-12345|12125|406999999999').map((row) => row.quantity_unit), [
@@ -167,4 +188,38 @@ test('converts saved packing rows back into visible sales packing rows', () => {
   assert.equal(saved[0].certScanned, '12345678')
   assert.equal(saved[0].scanStatus, 'scanned')
   assert.deepEqual(saved[0].warnings, ['Missing SKU/custom label'])
+})
+
+test('sorts saved packing rows by ascending sales record number after reload', () => {
+  const baseSavedRow = {
+    id: 'packing-1',
+    line_item_key: 'order|record|item',
+    sale_date: '26-May-26',
+    buyer_username: 'buyer-one',
+    sales_record_number: '12132',
+    item_number: '405358863537',
+    listing_title: 'PSA 10 Haunter',
+    custom_label: '',
+    quantity: 1,
+    sold_for: 3000,
+    postage_and_handling: 13,
+    total_price: 3013,
+    tracking_number: 'TRACK',
+    combined_order: false,
+    warnings: [],
+    quantity_unit: '1 of 1',
+    cert_scanned: null,
+    scan_status: 'pending' as const,
+    removed: false,
+    removed_reason: null,
+  }
+
+  const saved = buildSalesPackingRowsFromSaved([
+    { ...baseSavedRow, id: 'row-10', order_number: '1-1-1', sales_record_number: '10' },
+    { ...baseSavedRow, id: 'row-2', order_number: '10-1-1', sales_record_number: '2' },
+    { ...baseSavedRow, id: 'row-1', order_number: '2-1-1', sales_record_number: '1' },
+  ])
+
+  assert.deepEqual(saved.map((row) => row.salesRecordNumber), ['1', '2', '10'])
+  assert.deepEqual(saved.map((row) => row.orderNumber), ['2-1-1', '10-1-1', '1-1-1'])
 })

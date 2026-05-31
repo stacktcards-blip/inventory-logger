@@ -1,4 +1,5 @@
 import type { EbaySalesItemRow, SalesPackingRow } from './ebaySalesParser'
+import { compareSalesPackingRows } from './ebaySalesParser'
 
 export type SalesPackingVisibleRow = SalesPackingRow & {
   rowKey: string
@@ -130,7 +131,16 @@ export function buildSalesPackingImportPayload(
 }
 
 export function buildSalesPackingRowsFromSaved(rows: SavedSalesPackingRow[]): SalesPackingVisibleRow[] {
-  return rows.map((row) => ({
+  return rows
+    .map((row, originalIndex) => ({ row, originalIndex }))
+    .sort((a, b) => {
+      const rowDiff = compareSalesPackingRows(
+        { orderNumber: a.row.order_number, salesRecordNumber: a.row.sales_record_number, itemNumber: a.row.item_number },
+        { orderNumber: b.row.order_number, salesRecordNumber: b.row.sales_record_number, itemNumber: b.row.item_number }
+      )
+      return rowDiff || a.originalIndex - b.originalIndex
+    })
+    .map(({ row }) => ({
     rowKey: row.id,
     saleDate: row.sale_date,
     buyerUsername: row.buyer_username,

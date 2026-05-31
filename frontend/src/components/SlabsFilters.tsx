@@ -11,13 +11,15 @@ const SALES_STATUS_OPTIONS = [
   { value: '', label: 'All' },
   { value: 'NOT LISTED', label: 'Not listed' },
   { value: 'LISTED', label: 'Listed' },
+  { value: 'AWAITING AUCTION', label: 'Awaiting auction' },
   { value: 'SOLD', label: 'Sold' },
 ]
 
 const SLAB_ORIGIN_OPTIONS = [
   { value: '', label: 'All' },
   { value: 'GRADED_BY_US', label: 'Graded by us' },
-  { value: 'PURCHASED_SLAB', label: 'Purchased slab' },
+  { value: 'PURCHASED_GRADED', label: 'Purchased graded' },
+  { value: 'CONSIGNMENT', label: 'Consignment' },
   { value: 'UNKNOWN', label: 'Unknown' },
 ]
 

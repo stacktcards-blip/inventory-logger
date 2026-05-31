@@ -13,8 +13,8 @@ export function SlabsStatsCards({
 }: SlabsStatsCardsProps) {
   if (loading) {
     return (
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
-        {[...Array(5)].map((_, i) => (
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
+        {[...Array(6)].map((_, i) => (
           <div
             key={i}
             className="animate-pulse rounded-lg border border-base-border bg-base-surface p-3"
@@ -49,6 +49,12 @@ export function SlabsStatsCards({
       color: 'bg-gradient-to-br from-amber-900/40 to-amber-950/60 border-amber-700/40',
     },
     {
+      label: 'Awaiting auction',
+      value: stats.awaitingAuction,
+      status: 'AWAITING AUCTION',
+      color: 'bg-gradient-to-br from-purple-900/40 to-purple-950/60 border-purple-700/40',
+    },
+    {
       label: 'Sold',
       value: stats.sold,
       status: 'SOLD',
@@ -63,7 +69,7 @@ export function SlabsStatsCards({
   ]
 
   return (
-    <div className="grid grid-cols-2 gap-3 sm:grid-cols-5">
+    <div className="grid grid-cols-2 gap-3 sm:grid-cols-6">
       {cards.map((card) => (
         <button
           key={card.label}
