@@ -113,6 +113,7 @@ export const compareMasterCardCandidates = (
 ): ComparedMasterCardCandidate[] => {
   const existingByKey = new Map(existingCards.map((card) => [strictKey(card.setAbbr, card.num, card.lang), card]));
   const numberStyleBySetLang = buildNumberStyleBySetLang(existingCards);
+  const expectedSourceSetTotalBySetLang = buildExpectedSourceSetTotalBySetLang(candidates);
   const resolvedCandidates = candidates.map((candidate) => resolveCandidateNumberStyle(candidate, existingByKey, numberStyleBySetLang));
   const candidateKeyCounts = new Map<string, number>();
 
@@ -131,6 +132,17 @@ export const compareMasterCardCandidates = (
     }
     if (!candidate.normalizedNum || !candidate.normalizedCardName) {
       return withStatus(candidate, 'PARSE_INCOMPLETE', 'Missing normalized card number or card name', null);
+    }
+
+    const sourceSetTotal = sourceCardNumberDenominator(candidate.sourceCardNumber);
+    const expectedSetTotal = expectedSourceSetTotalBySetLang.get(setLangKey(candidate.normalizedSetAbbr, candidate.normalizedLang));
+    if (sourceSetTotal && expectedSetTotal && sourceSetTotal !== expectedSetTotal) {
+      return withStatus(
+        candidate,
+        'PARSE_INCOMPLETE',
+        `Source card number denominator ${sourceSetTotal} does not match the dominant set total ${expectedSetTotal} for this mapped set`,
+        null
+      );
     }
 
     const existing = key ? existingByKey.get(key) : undefined;
@@ -190,6 +202,38 @@ export const normalizeSetAbbr = (value: string | null | undefined): string | nul
 
 type NumericNumberStyle = {
   numericPadLength: number | null;
+};
+
+const buildExpectedSourceSetTotalBySetLang = (candidates: MasterCardCandidate[]) => {
+  const countsBySetLang = new Map<string, Map<string, number>>();
+
+  for (const candidate of candidates) {
+    const key = setLangKey(candidate.normalizedSetAbbr, candidate.normalizedLang);
+    const denominator = sourceCardNumberDenominator(candidate.sourceCardNumber);
+    if (!key || !denominator) continue;
+    const counts = countsBySetLang.get(key) ?? new Map<string, number>();
+    counts.set(denominator, (counts.get(denominator) ?? 0) + 1);
+    countsBySetLang.set(key, counts);
+  }
+
+  const expected = new Map<string, string>();
+  for (const [key, counts] of countsBySetLang.entries()) {
+    const sorted = [...counts.entries()].sort((a, b) => b[1] - a[1]);
+    const [denominator, count] = sorted[0] ?? [];
+    // Require enough evidence before treating a denominator as the set total.
+    // This catches polluted source rows such as Celebrations 014/083 while
+    // avoiding overconfidence on tiny/incomplete API responses.
+    if (denominator && count >= 5) expected.set(key, denominator);
+  }
+
+  return expected;
+};
+
+const sourceCardNumberDenominator = (value: string | null | undefined): string | null => {
+  const cleaned = cleanNullable(value);
+  const denominator = cleaned?.split('/')[1]?.trim();
+  if (!denominator || !/^\d+$/.test(denominator)) return null;
+  return stripNumericLeadingZeroes(denominator);
 };
 
 const buildNumberStyleBySetLang = (existingCards: ExistingMasterCard[]) => {

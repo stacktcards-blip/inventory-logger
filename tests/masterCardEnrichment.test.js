@@ -102,6 +102,25 @@ test('uses unpadded master_cards card numbers for older set conventions like Gen
   assert.equal(compared[1].matchStatus, 'MATCHED_EXISTING');
 });
 
+test('flags source rows whose card-number denominator does not match the dominant mapped set total', () => {
+  const celMapping = { ...mapping, sourceSetId: 'cel', sourceSetName: 'Celebrations', stacktSetAbbr: 'CEL' };
+  const candidates = [
+    normalizePokemonPriceTrackerCard({ ...baseCard, id: 'cel-1', name: 'Ho-Oh', number: '001/025' }, celMapping),
+    normalizePokemonPriceTrackerCard({ ...baseCard, id: 'cel-2', name: 'Reshiram', number: '002/025' }, celMapping),
+    normalizePokemonPriceTrackerCard({ ...baseCard, id: 'cel-3', name: 'Kyogre', number: '003/025' }, celMapping),
+    normalizePokemonPriceTrackerCard({ ...baseCard, id: 'cel-4', name: 'Palkia', number: '004/025' }, celMapping),
+    normalizePokemonPriceTrackerCard({ ...baseCard, id: 'cel-5', name: 'Pikachu', number: '005/025' }, celMapping),
+    normalizePokemonPriceTrackerCard({ ...baseCard, id: 'polluted-pony', name: 'Ponyta', number: '014/083' }, celMapping)
+  ];
+
+  const compared = compareMasterCardCandidates(candidates, [
+    { id: 100, cardName: 'Cosmoem', setAbbr: 'CEL', num: '014', lang: 'ENG' }
+  ]);
+
+  assert.equal(compared[5].matchStatus, 'PARSE_INCOMPLETE');
+  assert.match(compared[5].matchReason, /denominator 83 does not match/);
+});
+
 test('marks candidates as needing a set mapping when no confirmed Stackt set abbreviation exists', () => {
   const candidate = normalizePokemonPriceTrackerCard(baseCard, null);
   const [compared] = compareMasterCardCandidates([candidate], []);
