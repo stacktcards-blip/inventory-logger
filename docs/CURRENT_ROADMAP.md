@@ -42,7 +42,7 @@ Current stance: do not spend more here unless real intake batches expose frictio
 - Flag missing SKU/custom label, high-value missing SKU, combined orders, multi-quantity rows, and blank item/title.
 - Remove non-slab/unwanted rows from the working view/export.
 - Export expanded CSV.
-- Rows now sort by ascending order number for packing flow.
+- Rows now sort by ascending Sales Record Number for packing flow (numeric-aware; order number is only an audit/tie-break field).
 - Pressing Enter after scanning a cert moves focus to the next visible cert field for continuous barcode scanning.
 
 ### Sales Packing saved sessions MVP

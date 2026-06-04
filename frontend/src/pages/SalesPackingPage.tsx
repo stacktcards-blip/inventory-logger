@@ -9,11 +9,14 @@ import {
 import { findNextSalesPackingScanKey } from '../lib/salesPackingScan'
 import {
   buildCertValidationMap,
+  buildPreviousSessionCertScanMap,
   normalizePackingCert,
   validatePackingCert,
   type CertValidationSlabRow,
+  type PreviousSessionCertScanRow,
 } from '../lib/salesPackingCertValidation'
 import {
+  buildDuplicateOrderCounts,
   buildSalesPackingImportPayload,
   buildSalesPackingRowsFromSaved,
   type SalesPackingVisibleRow,
@@ -48,6 +51,43 @@ type SalesPackingImportSummary = {
   status: string
 }
 
+type PreviousSessionImportRow = {
+  uploaded_at: string | null
+  source_filename: string | null
+  status: string | null
+}
+
+type PreviousSessionCertQueryRow = {
+  id: string
+  import_id: string
+  cert_scanned: string | null
+  order_number: string | null
+  sales_record_number: string | null
+  item_number: string | null
+  sales_packing_imports: PreviousSessionImportRow | PreviousSessionImportRow[] | null
+}
+
+function isMissingSalesPackingPersistence(message: string): boolean {
+  const normalized = message.toLowerCase()
+  return (
+    normalized.includes('sales_packing_imports') ||
+    normalized.includes('sales_packing_item_rows') ||
+    normalized.includes('sales_packing_rows')
+  ) && (
+    normalized.includes('does not exist') ||
+    normalized.includes('could not find') ||
+    normalized.includes('schema cache') ||
+    normalized.includes('column')
+  )
+}
+
+function statusTone(status: string): string {
+  const normalized = status.toLowerCase()
+  if (normalized === 'scanned') return 'border-emerald-700/50 bg-emerald-900/30 text-emerald-200'
+  if (normalized === 'partially_scanned') return 'border-blue-700/50 bg-blue-900/30 text-blue-200'
+  return 'border-slate-700/60 bg-slate-900/60 text-slate-300'
+}
+
 export function SalesPackingPage() {
   const [csvText, setCsvText] = useState('')
   const [sourceFilename, setSourceFilename] = useState<string | null>(null)
@@ -59,9 +99,11 @@ export function SalesPackingPage() {
   const [isSavingImport, setIsSavingImport] = useState(false)
   const [isLoadingImport, setIsLoadingImport] = useState(false)
   const [validationRows, setValidationRows] = useState<CertValidationSlabRow[]>([])
+  const [previousSessionRows, setPreviousSessionRows] = useState<PreviousSessionCertScanRow[]>([])
   const [validationError, setValidationError] = useState<string | null>(null)
   const [persistenceMessage, setPersistenceMessage] = useState<string | null>(null)
   const [persistenceError, setPersistenceError] = useState<string | null>(null)
+  const [savedSessionsUnavailable, setSavedSessionsUnavailable] = useState(false)
   const certInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
 
   const parsed = useMemo(() => {
@@ -83,9 +125,16 @@ export function SalesPackingPage() {
       .limit(12)
 
     if (error) {
+      if (isMissingSalesPackingPersistence(error.message)) {
+        setSavedSessionsUnavailable(true)
+        setSavedImports([])
+        setPersistenceError(null)
+        return
+      }
       setPersistenceError(error.message)
       return
     }
+    setSavedSessionsUnavailable(false)
     setSavedImports((data ?? []) as SalesPackingImportSummary[])
   }
 
@@ -97,24 +146,32 @@ export function SalesPackingPage() {
     return buildSalesPackingRowsFromSaved(savedRows.filter((row) => !row.removed))
   }, [savedRows])
 
-  const parsedVisibleRows: SalesPackingVisibleRow[] = useMemo(() => {
+  const parsedRowsWithState: SalesPackingVisibleRow[] = useMemo(() => {
     if (!result) return []
     return result.expandedRows
       .map((row, index) => ({ ...row, rowKey: rowKey(row, index) }))
-      .filter((row) => !removedRowKeys.has(row.rowKey))
       .map((row) => {
         const cert = certValues[row.rowKey]?.trim() ?? ''
+        const removed = removedRowKeys.has(row.rowKey)
         return {
           ...row,
           certScanned: cert,
           scanStatus: cert ? 'scanned' as const : 'pending' as const,
+          removed,
+          removedReason: removed ? 'removed_from_packing_view' : null,
         }
       })
   }, [certValues, removedRowKeys, result])
 
+  const parsedVisibleRows: SalesPackingVisibleRow[] = useMemo(() => {
+    return parsedRowsWithState.filter((row) => !row.removed)
+  }, [parsedRowsWithState])
+
   const rowsWithCerts = activeImport ? savedVisibleRows : parsedVisibleRows
+  const allRowsForPersistence = activeImport ? rowsWithCerts : parsedRowsWithState
 
   const validationMap = useMemo(() => buildCertValidationMap(validationRows), [validationRows])
+  const previousSessionMap = useMemo(() => buildPreviousSessionCertScanMap(previousSessionRows), [previousSessionRows])
   const scannedCertsForValidation = useMemo(
     () => rowsWithCerts.map((row) => ({ rowKey: row.rowKey, cert: row.certScanned })),
     [rowsWithCerts]
@@ -122,32 +179,71 @@ export function SalesPackingPage() {
   const validationByRowKey = useMemo(() => {
     const entries = rowsWithCerts.map((row) => [
       row.rowKey,
-      validatePackingCert(row.certScanned, row.rowKey, validationMap, scannedCertsForValidation),
+      validatePackingCert(row.certScanned, row.rowKey, validationMap, scannedCertsForValidation, previousSessionMap),
     ] as const)
     return new Map(entries)
-  }, [rowsWithCerts, scannedCertsForValidation, validationMap])
+  }, [rowsWithCerts, scannedCertsForValidation, validationMap, previousSessionMap])
 
   useEffect(() => {
     const certs = [...new Set(rowsWithCerts.map((row) => normalizePackingCert(row.certScanned)).filter(Boolean))]
     if (!certs.length) {
       setValidationRows([])
+      setPreviousSessionRows([])
       setValidationError(null)
       return
     }
 
     let cancelled = false
     const loadCertValidationRows = async () => {
-      const { data, error } = await supabase
+      const { data: slabData, error: slabError } = await supabase
         .from('slabs_dashboard')
         .select('*')
         .in('cert', certs)
       if (cancelled) return
-      if (error) {
+      if (slabError) {
         setValidationRows([])
-        setValidationError(error.message)
+        setPreviousSessionRows([])
+        setValidationError(slabError.message)
         return
       }
-      setValidationRows((data ?? []) as CertValidationSlabRow[])
+
+      let previousQuery = supabase
+        .from('sales_packing_rows')
+        .select('id, import_id, cert_scanned, order_number, sales_record_number, item_number, sales_packing_imports!inner(uploaded_at, source_filename, status)')
+        .in('cert_scanned_normalized', certs)
+        .eq('removed', false)
+        .neq('sales_packing_imports.status', 'cancelled')
+        .limit(25)
+      if (activeImport) previousQuery = previousQuery.neq('import_id', activeImport.id)
+
+      const { data: previousData, error: previousError } = await previousQuery
+      if (cancelled) return
+      if (previousError) {
+        setValidationRows((slabData ?? []) as CertValidationSlabRow[])
+        setPreviousSessionRows([])
+        setValidationError(previousError.message)
+        return
+      }
+
+      const previousRows = ((previousData ?? []) as unknown as PreviousSessionCertQueryRow[]).map((row) => {
+        const importRow = (Array.isArray(row.sales_packing_imports)
+          ? row.sales_packing_imports[0] ?? null
+          : row.sales_packing_imports) as PreviousSessionImportRow | null
+        return {
+          import_id: row.import_id,
+          row_id: row.id,
+          cert_scanned: row.cert_scanned,
+          source_filename: importRow?.source_filename ?? null,
+          status: importRow?.status ?? null,
+          uploaded_at: importRow?.uploaded_at ?? null,
+          order_number: row.order_number,
+          sales_record_number: row.sales_record_number,
+          item_number: row.item_number,
+        }
+      })
+
+      setValidationRows((slabData ?? []) as CertValidationSlabRow[])
+      setPreviousSessionRows(previousRows)
       setValidationError(null)
     }
 
@@ -155,7 +251,7 @@ export function SalesPackingPage() {
     return () => {
       cancelled = true
     }
-  }, [rowsWithCerts])
+  }, [rowsWithCerts, activeImport])
 
   const activeSummary = useMemo(() => {
     if (activeImport) {
@@ -180,6 +276,8 @@ export function SalesPackingPage() {
     ? savedRows.filter((row) => row.removed).length
     : result ? removedRowKeys.size : 0
   const visibleRowKeys = useMemo(() => rowsWithCerts.map((row) => row.rowKey), [rowsWithCerts])
+  const duplicateOrderCounts = useMemo(() => buildDuplicateOrderCounts(rowsWithCerts), [rowsWithCerts])
+  const duplicateOrderEntries = useMemo(() => [...duplicateOrderCounts.entries()], [duplicateOrderCounts])
 
   const focusNextCertInput = (currentKey: string) => {
     const nextKey = findNextSalesPackingScanKey(visibleRowKeys, currentKey)
@@ -226,13 +324,17 @@ export function SalesPackingPage() {
   }
 
   const handleSaveImport = async () => {
-    if (!result || !rowsWithCerts.length) return
+    if (!result || !allRowsForPersistence.length) return
+    if (savedSessionsUnavailable) {
+      setPersistenceError('Saved packing sessions are unavailable because the sales-packing tables are missing. CSV parsing and export still work.')
+      return
+    }
     setIsSavingImport(true)
     setPersistenceError(null)
     setPersistenceMessage(null)
     try {
       const { data: userData } = await supabase.auth.getUser()
-      const payload = buildSalesPackingImportPayload(result.itemRows, rowsWithCerts, {
+      const payload = buildSalesPackingImportPayload(result.itemRows, allRowsForPersistence, {
         filename: sourceFilename,
         csvText,
       })
@@ -259,7 +361,13 @@ export function SalesPackingPage() {
       await loadSavedImports()
       await loadSavedImport(importData as SalesPackingImportSummary)
     } catch (e) {
-      setPersistenceError(e instanceof Error ? e.message : 'Could not save import')
+      const message = e instanceof Error ? e.message : 'Could not save import'
+      if (isMissingSalesPackingPersistence(message)) {
+        setSavedSessionsUnavailable(true)
+        setPersistenceError('Saved packing sessions unavailable: apply migrations 023 and 036 in Supabase. CSV parsing/export still works.')
+      } else {
+        setPersistenceError(message)
+      }
     } finally {
       setIsSavingImport(false)
     }
@@ -388,7 +496,11 @@ export function SalesPackingPage() {
             Refresh
           </button>
         </div>
-        {savedImports.length ? (
+        {savedSessionsUnavailable ? (
+          <div className="rounded-md border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-xs text-amber-200">
+            Saved sessions unavailable — apply sales packing migrations 023 and 036 to enable save/reopen. CSV paste, parse, scan, remove, and export still work locally.
+          </div>
+        ) : savedImports.length ? (
           <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {savedImports.map((item) => (
               <div
@@ -401,9 +513,14 @@ export function SalesPackingPage() {
                   onClick={() => void loadSavedImport(item)}
                   className="block w-full px-3 py-2 pr-9 text-left text-xs"
                 >
-                  <div className="font-semibold text-slate-100">{item.source_filename || 'Pasted CSV'}</div>
-                  <div className="mt-1 text-slate-400">{new Date(item.uploaded_at).toLocaleString()} · {item.expanded_row_count} rows · {item.status}</div>
-                  <div className="mt-1 text-slate-500">Orders: {item.order_count} · Sold: {formatAud(Number(item.total_sold_ex_postage ?? 0))}</div>
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="font-semibold text-slate-100">{item.source_filename || 'Pasted CSV'}</div>
+                    <span className={`shrink-0 rounded-full border px-2 py-0.5 text-2xs font-semibold uppercase tracking-wider ${statusTone(item.status)}`}>
+                      {item.status.replace('_', ' ')}
+                    </span>
+                  </div>
+                  <div className="mt-1 text-slate-400">{new Date(item.uploaded_at).toLocaleString()} · {item.expanded_row_count} packing rows</div>
+                  <div className="mt-1 text-slate-500">Orders: {item.order_count} · Items: {item.row_count} · Sold: {formatAud(Number(item.total_sold_ex_postage ?? 0))}</div>
                 </button>
                 <button
                   type="button"
@@ -448,11 +565,11 @@ export function SalesPackingPage() {
                   </button>
                   <button
                     type="button"
-                    disabled={isSavingImport || !rowsWithCerts.length}
+                    disabled={isSavingImport || savedSessionsUnavailable || !rowsWithCerts.length}
                     onClick={() => void handleSaveImport()}
                     className="rounded-md border border-emerald-600/50 bg-emerald-600/20 px-3 py-2 text-xs font-medium text-emerald-200 transition-colors hover:bg-emerald-600/30 disabled:cursor-not-allowed disabled:opacity-50"
                   >
-                    {isSavingImport ? 'Saving…' : 'Save import'}
+                    {savedSessionsUnavailable ? 'Save unavailable' : isSavingImport ? 'Saving…' : 'Save import'}
                   </button>
                 </div>
               )}
@@ -506,12 +623,13 @@ export function SalesPackingPage() {
 
       {activeSummary && (
         <>
-          <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-10">
+          <div className="grid gap-3 md:grid-cols-4 xl:grid-cols-11">
             <Metric label="Orders" value={activeSummary.orderCount} />
             <Metric label="Item rows" value={activeSummary.itemRowCount} />
             <Metric label="Packing rows" value={activeSummary.expandedRowCount} />
             <Metric label="Scanned" value={activeSummary.scannedRows} tone={activeSummary.scannedRows ? 'good' : 'default'} />
             <Metric label="Removed rows" value={removedRowCount} tone={removedRowCount ? 'warn' : 'default'} />
+            <Metric label="Repeat orders" value={duplicateOrderEntries.length} tone={duplicateOrderEntries.length ? 'warn' : 'default'} />
             <Metric label="Sold ex postage" value={formatAud(activeSummary.totalSoldExPostage)} />
             <Metric label="Missing SKU" value={activeSummary.missingSkuCount} tone={activeSummary.missingSkuCount ? 'warn' : 'default'} />
             <Metric label="High-value no SKU" value={activeSummary.highValueMissingSkuCount} tone={activeSummary.highValueMissingSkuCount ? 'danger' : 'default'} />
@@ -537,6 +655,23 @@ export function SalesPackingPage() {
               </button>
             )}
           </div>
+
+          {duplicateOrderEntries.length > 0 && (
+            <div className="rounded-lg border border-sky-800/50 bg-sky-950/20 p-3 text-xs text-sky-100">
+              <div className="mb-2 font-semibold">Repeat orders in this session</div>
+              <div className="mb-2 text-sky-200/80">Informational only — this is normal for combined or multi-item orders, but it helps avoid missing a slab for the same buyer/order.</div>
+              <div className="flex flex-wrap gap-2">
+                {duplicateOrderEntries.slice(0, 12).map(([orderNumber, count]) => (
+                  <span key={orderNumber} className="rounded-full border border-sky-700/50 bg-sky-900/30 px-2 py-1">
+                    {orderNumber}: {count} rows
+                  </span>
+                ))}
+                {duplicateOrderEntries.length > 12 && (
+                  <span className="rounded-full border border-sky-700/50 bg-sky-900/30 px-2 py-1">+{duplicateOrderEntries.length - 12} more</span>
+                )}
+              </div>
+            </div>
+          )}
 
           {warningCounts.length > 0 && (
             <div className="rounded-lg border border-amber-800/50 bg-amber-950/20 p-3 text-xs text-amber-100">
@@ -626,7 +761,14 @@ export function SalesPackingPage() {
                       <td className="min-w-[24rem] max-w-xl px-3 py-2 text-xs text-slate-200">{row.listingTitle || '—'}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">{row.customLabel || '—'}</td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-200">{formatAud(row.soldFor)}</td>
-                      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-400">{row.orderNumber || '—'}</td>
+                      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-400">
+                        <div>{row.orderNumber || '—'}</div>
+                        {row.orderNumber && duplicateOrderCounts.has(row.orderNumber) && (
+                          <div className="mt-1 inline-flex rounded-full border border-sky-700/50 bg-sky-900/30 px-2 py-0.5 text-2xs text-sky-200">
+                            repeats ×{duplicateOrderCounts.get(row.orderNumber)}
+                          </div>
+                        )}
+                      </td>
                       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-400">{row.trackingNumber || '—'}</td>
                       <td className="min-w-[14rem] px-3 py-2 text-xs text-amber-200">
                         {row.warnings.length ? row.warnings.join('; ') : '—'}

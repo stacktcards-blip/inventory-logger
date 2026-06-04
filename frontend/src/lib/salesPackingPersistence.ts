@@ -3,6 +3,8 @@ import { compareSalesPackingRows } from './ebaySalesParser'
 
 export type SalesPackingVisibleRow = SalesPackingRow & {
   rowKey: string
+  removed?: boolean
+  removedReason?: string | null
 }
 
 export type SalesPackingImportInsert = {
@@ -72,8 +74,32 @@ export type SavedSalesPackingRow = {
   removed_reason: string | null
 }
 
+export function buildDuplicateOrderCounts(rows: Array<Pick<SalesPackingRow, 'orderNumber'>>): Map<string, number> {
+  const counts = new Map<string, number>()
+  rows.forEach((row) => {
+    const orderNumber = row.orderNumber.trim()
+    if (!orderNumber) return
+    counts.set(orderNumber, (counts.get(orderNumber) ?? 0) + 1)
+  })
+
+  return new Map([...counts.entries()].filter(([, count]) => count > 1))
+}
+
 function lineItemKey(row: Pick<EbaySalesItemRow, 'orderNumber' | 'salesRecordNumber' | 'itemNumber'>): string {
   return [row.orderNumber, row.salesRecordNumber, row.itemNumber].join('|')
+}
+
+function assertUniqueLineItemKeys(itemRows: EbaySalesItemRow[]): void {
+  const counts = new Map<string, number>()
+  itemRows.forEach((row) => {
+    const key = lineItemKey(row)
+    counts.set(key, (counts.get(key) ?? 0) + 1)
+  })
+
+  const duplicates = [...counts.entries()].filter(([, count]) => count > 1).map(([key]) => key)
+  if (duplicates.length) {
+    throw new Error(`Duplicate eBay item line key before save: ${duplicates.join(', ')}`)
+  }
 }
 
 function itemInsert(row: EbaySalesItemRow): SalesPackingItemInsert {
@@ -102,17 +128,20 @@ export function buildSalesPackingImportPayload(
   packingRows: SalesPackingVisibleRow[],
   options: { filename?: string | null; csvText?: string | null } = {}
 ): SalesPackingImportPayload {
-  const orderCount = new Set(packingRows.map((row) => row.orderNumber).filter(Boolean)).size
-  const totalSoldExPostage = packingRows.reduce((sum, row) => sum + (row.soldFor ?? 0), 0)
+  assertUniqueLineItemKeys(itemRows)
+
+  const activePackingRows = packingRows.filter((row) => !row.removed)
+  const orderCount = new Set(activePackingRows.map((row) => row.orderNumber).filter(Boolean)).size
+  const totalSoldExPostage = activePackingRows.reduce((sum, row) => sum + (row.soldFor ?? 0), 0)
 
   return {
     importRow: {
       source_filename: options.filename ?? null,
       row_count: itemRows.length,
-      expanded_row_count: packingRows.length,
+      expanded_row_count: activePackingRows.length,
       order_count: orderCount,
       total_sold_ex_postage: totalSoldExPostage,
-      status: packingRows.some((row) => row.certScanned.trim()) ? 'partially_scanned' : 'imported',
+      status: activePackingRows.some((row) => row.certScanned.trim()) ? 'partially_scanned' : 'imported',
       raw_csv_text: options.csvText ?? null,
     },
     itemRows: itemRows.map(itemInsert),
@@ -121,10 +150,10 @@ export function buildSalesPackingImportPayload(
       return {
         ...insertRow,
         quantity_unit: row.quantityUnit,
-        cert_scanned: row.certScanned,
+        cert_scanned: row.certScanned.trim(),
         scan_status: row.certScanned.trim() ? 'scanned' : 'pending',
-        removed: false,
-        removed_reason: null,
+        removed: row.removed ?? false,
+        removed_reason: row.removed ? row.removedReason ?? 'removed_from_packing_view' : null,
       }
     }),
   }

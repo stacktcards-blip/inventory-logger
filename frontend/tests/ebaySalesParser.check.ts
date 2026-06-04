@@ -7,7 +7,12 @@ import {
   parseEbaySalesCsv,
 } from '../src/lib/ebaySalesParser'
 import { findNextSalesPackingScanKey } from '../src/lib/salesPackingScan'
-import { buildSalesPackingImportPayload, buildSalesPackingRowsFromSaved } from '../src/lib/salesPackingPersistence'
+import { buildDuplicateOrderCounts, buildSalesPackingImportPayload, buildSalesPackingRowsFromSaved } from '../src/lib/salesPackingPersistence'
+import {
+  buildCertValidationMap,
+  buildPreviousSessionCertScanMap,
+  validatePackingCert,
+} from '../src/lib/salesPackingCertValidation'
 
 const sampleCsv = `
 "Sales Record Number","Order Number","Buyer Username","Item Number","Item Title","Custom Label","Quantity","Sold For","Postage And Handling","Total Price","Sale Date","Tracking Number"
@@ -125,6 +130,16 @@ test('recalculates summary and export from included rows after non-slab rows are
   assert.match(csv, /Mega Gengar EX/)
 })
 
+test('summarizes repeat orders as informational duplicate-order visibility', () => {
+  const result = parseEbaySalesCsv(sampleCsv)
+  const duplicateOrderCounts = buildDuplicateOrderCounts(result.expandedRows)
+
+  assert.deepEqual([...duplicateOrderCounts.entries()], [
+    ['04-14689-12345', 3],
+    ['01-14701-30101', 2],
+  ])
+})
+
 test('builds sales packing import payload with one item row and one packing row per physical item', () => {
   const result = parseEbaySalesCsv(sampleCsv)
   const rows = result.expandedRows.map((row, index) => ({
@@ -154,6 +169,48 @@ test('builds sales packing import payload with one item row and one packing row 
   ])
   assert.equal('raw_item_json' in payload.itemRows[0], true)
   assert.equal('raw_item_json' in payload.packingRows[0], false)
+})
+
+test('persists removed rows and scanned certs in packing payload without counting removed rows as active', () => {
+  const result = parseEbaySalesCsv(sampleCsv)
+  const rows = result.expandedRows.map((row, index) => ({
+    ...row,
+    rowKey: `${row.orderNumber}-${row.itemNumber}-${row.quantityUnit}-${index}`,
+    certScanned: index === 0 ? ' 1234-5678 ' : '',
+    scanStatus: index === 0 ? 'scanned' as const : 'pending' as const,
+    removed: index === 1,
+    removedReason: index === 1 ? 'removed_from_packing_view' : null,
+  }))
+
+  const payload = buildSalesPackingImportPayload(result.itemRows, rows, {
+    filename: 'orders.csv',
+    csvText: sampleCsv,
+  })
+
+  assert.equal(payload.importRow.expanded_row_count, 5)
+  assert.equal(payload.importRow.status, 'partially_scanned')
+  assert.equal(payload.packingRows.length, 6)
+  assert.equal(payload.packingRows[0].cert_scanned, '1234-5678')
+  assert.equal(payload.packingRows[0].scan_status, 'scanned')
+  assert.equal(payload.packingRows[1].removed, true)
+  assert.equal(payload.packingRows[1].removed_reason, 'removed_from_packing_view')
+})
+
+test('rejects duplicate line item keys before saving because the database constraint would fail', () => {
+  const result = parseEbaySalesCsv(sampleCsv)
+  const duplicateItemRows = [result.itemRows[0], { ...result.itemRows[0], listingTitle: 'Duplicate line' }]
+  const rows = duplicateItemRows.map((row, index) => ({
+    ...row,
+    rowKey: `duplicate-${index}`,
+    quantityUnit: '1 of 1',
+    certScanned: '',
+    scanStatus: 'pending' as const,
+  }))
+
+  assert.throws(
+    () => buildSalesPackingImportPayload(duplicateItemRows, rows),
+    /Duplicate eBay item line key before save/
+  )
 })
 
 test('converts saved packing rows back into visible sales packing rows', () => {
@@ -222,4 +279,53 @@ test('sorts saved packing rows by ascending sales record number after reload', (
 
   assert.deepEqual(saved.map((row) => row.salesRecordNumber), ['1', '2', '10'])
   assert.deepEqual(saved.map((row) => row.orderNumber), ['2-1-1', '10-1-1', '1-1-1'])
+})
+
+test('warns when a cert was already scanned in a previous non-cancelled packing session', () => {
+  const previousScans = buildPreviousSessionCertScanMap([
+    {
+      import_id: 'previous-import',
+      row_id: 'previous-row',
+      cert_scanned: '1234-5678',
+      source_filename: 'previous-orders.csv',
+      status: 'partially_scanned',
+      uploaded_at: '2026-06-01T00:00:00Z',
+      order_number: '01-11111-11111',
+      sales_record_number: '100',
+      item_number: 'item-1',
+    },
+  ])
+
+  const validation = validatePackingCert(
+    '12345678',
+    'current-row',
+    buildCertValidationMap([]),
+    [{ rowKey: 'current-row', cert: '12345678' }],
+    previousScans
+  )
+
+  assert.equal(validation.status, 'previous_session_match')
+  assert.equal(validation.tone, 'warn')
+  assert.match(validation.message, /previous packing session previous-orders\.csv/)
+})
+
+test('treats slab rows with a sold date as not available without writing sale state', () => {
+  const validation = validatePackingCert(
+    '99999999',
+    'row-1',
+    buildCertValidationMap([
+      {
+        id: 'slab-1',
+        cert: '99999999',
+        grading_company: 'PSA',
+        grade: '10',
+        card_name: 'Test Card',
+        sold_date: '2026-05-30',
+      },
+    ]),
+    [{ rowKey: 'row-1', cert: '99999999' }]
+  )
+
+  assert.equal(validation.status, 'not_available')
+  assert.equal(validation.tone, 'danger')
 })

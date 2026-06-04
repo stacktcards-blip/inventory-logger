@@ -3,6 +3,7 @@ export type CertValidationStatus =
   | 'found_available'
   | 'not_found'
   | 'duplicate_in_session'
+  | 'previous_session_match'
   | 'not_available'
   | 'needs_enrichment'
   | 'duplicate_in_inventory'
@@ -35,6 +36,7 @@ export type CertValidationSlabSummary = {
   lang: string | null
   salesStatus: string | null
   listingState: string | null
+  soldDate: string | null
   metadataStatus: string | null
 }
 
@@ -46,6 +48,30 @@ export type CertValidationResult = {
 }
 
 export type ScannedCert = { rowKey: string; cert: string }
+
+export type PreviousSessionCertScanRow = {
+  import_id: string
+  row_id: string
+  cert_scanned: string | null
+  source_filename: string | null
+  status: string | null
+  uploaded_at: string | null
+  order_number: string | null
+  sales_record_number: string | null
+  item_number: string | null
+}
+
+export type PreviousSessionCertScanSummary = {
+  importId: string
+  rowId: string
+  cert: string
+  sourceFilename: string | null
+  status: string | null
+  uploadedAt: string | null
+  orderNumber: string | null
+  salesRecordNumber: string | null
+  itemNumber: string | null
+}
 
 function normalizeCert(cert: string | null | undefined): string {
   return String(cert ?? '').replace(/[^0-9A-Za-z]/g, '').toUpperCase()
@@ -68,6 +94,7 @@ function summarizeSlab(row: CertValidationSlabRow): CertValidationSlabSummary {
     lang: row.lang ?? null,
     salesStatus: row.sales_status ?? null,
     listingState: row.listing_state ?? null,
+    soldDate: row.sold_date ?? null,
     metadataStatus: row.metadata_status ?? null,
   }
 }
@@ -79,6 +106,30 @@ export function buildCertValidationMap(rows: CertValidationSlabRow[]): Map<strin
     if (!cert) return
     const list = map.get(cert) ?? []
     list.push(summarizeSlab(row))
+    map.set(cert, list)
+  })
+  return map
+}
+
+export function buildPreviousSessionCertScanMap(
+  rows: PreviousSessionCertScanRow[]
+): Map<string, PreviousSessionCertScanSummary[]> {
+  const map = new Map<string, PreviousSessionCertScanSummary[]>()
+  rows.forEach((row) => {
+    const cert = normalizeCert(row.cert_scanned)
+    if (!cert) return
+    const list = map.get(cert) ?? []
+    list.push({
+      importId: row.import_id,
+      rowId: row.row_id,
+      cert,
+      sourceFilename: row.source_filename ?? null,
+      status: row.status ?? null,
+      uploadedAt: row.uploaded_at ?? null,
+      orderNumber: row.order_number ?? null,
+      salesRecordNumber: row.sales_record_number ?? null,
+      itemNumber: row.item_number ?? null,
+    })
     map.set(cert, list)
   })
   return map
@@ -101,14 +152,25 @@ function slabNeedsEnrichment(slab: CertValidationSlabSummary): boolean {
 }
 
 function slabUnavailable(slab: CertValidationSlabSummary): boolean {
-  return normalizedText(slab.salesStatus) === 'SOLD' || normalizedText(slab.listingState) === 'SOLD'
+  return normalizedText(slab.salesStatus) === 'SOLD' || normalizedText(slab.listingState) === 'SOLD' || Boolean(slab.soldDate)
+}
+
+function previousSessionMessage(previous: PreviousSessionCertScanSummary): string {
+  const label = previous.sourceFilename || previous.importId
+  const context = [
+    previous.salesRecordNumber ? `SR ${previous.salesRecordNumber}` : null,
+    previous.orderNumber ? `order ${previous.orderNumber}` : null,
+    previous.itemNumber ? `item ${previous.itemNumber}` : null,
+  ].filter(Boolean).join(' · ')
+  return `Already scanned in previous packing session ${label}${context ? ` (${context})` : ''}`
 }
 
 export function validatePackingCert(
   rawCert: string,
   rowKey: string,
   slabsByCert: Map<string, CertValidationSlabSummary[]>,
-  scannedCerts: ScannedCert[]
+  scannedCerts: ScannedCert[],
+  previousScansByCert: Map<string, PreviousSessionCertScanSummary[]> = new Map()
 ): CertValidationResult {
   const cert = normalizeCert(rawCert)
   if (!cert) {
@@ -121,7 +183,11 @@ export function validatePackingCert(
   }
 
   const matches = slabsByCert.get(cert) ?? []
+  const previousMatches = previousScansByCert.get(cert) ?? []
   if (matches.length === 0) {
+    if (previousMatches.length > 0) {
+      return { status: 'previous_session_match', tone: 'warn', message: previousSessionMessage(previousMatches[0]), slab: null }
+    }
     return { status: 'not_found', tone: 'warn', message: 'Cert not found in slab DB', slab: null }
   }
 
@@ -132,6 +198,10 @@ export function validatePackingCert(
 
   if (slabUnavailable(slab)) {
     return { status: 'not_available', tone: 'danger', message: `${displayName(slab)} — appears sold/not available`, slab }
+  }
+
+  if (previousMatches.length > 0) {
+    return { status: 'previous_session_match', tone: 'warn', message: previousSessionMessage(previousMatches[0]), slab }
   }
 
   if (slabNeedsEnrichment(slab)) {
