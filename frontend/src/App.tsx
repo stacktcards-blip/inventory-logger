@@ -10,6 +10,7 @@ import { AddRawCardsPage } from './pages/AddRawCardsPage'
 import { SlabIntakePage } from './pages/SlabIntakePage'
 import { SalesPackingPage } from './pages/SalesPackingPage'
 import { SlabReconciliationPage } from './pages/SlabReconciliationPage'
+import { MasterCardsReviewPage } from './pages/MasterCardsReviewPage'
 
 function App() {
   return (
@@ -30,6 +31,7 @@ function App() {
           <Route path="grading-orders" element={<GradingOrdersPage />} />
           <Route path="raw-cards" element={<RawCardsPage />} />
           <Route path="raw-cards/add" element={<AddRawCardsPage />} />
+          <Route path="master-cards/review" element={<MasterCardsReviewPage />} />
           <Route path="sales-packing" element={<SalesPackingPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
