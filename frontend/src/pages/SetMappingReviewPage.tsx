@@ -138,7 +138,14 @@ export function SetMappingReviewPage() {
       return
     }
     if (!masterSetByAbbr.has(stacktSetAbbr)) {
-      setError(`${stacktSetAbbr} is not present in current ENG master_cards/card_sets options.`)
+      const suggestion = suggestMasterSet(row, masterSets)
+      const promoHint = isMixedPromoBucket(row)
+        ? ' This external promo bucket is not one Stackt set; your master_cards uses per-promo strict keys such as SWSH001, SWSH002, etc. Ignore this row for now rather than mapping it to SWSH.'
+        : ''
+      const suggestionHint = suggestion
+        ? ` Did you mean ${suggestion.set_abbr}${suggestion.canonical_set_name ? ` (${suggestion.canonical_set_name})` : ''}?`
+        : ''
+      setError(`${stacktSetAbbr} is not present in current ENG master_cards/card_sets options.${suggestionHint}${promoHint}`)
       return
     }
 
@@ -278,6 +285,11 @@ export function SetMappingReviewPage() {
                   <td className="min-w-[16rem] px-3 py-2 text-xs">
                     <div className="font-medium text-slate-100">{row.source_set_name || '—'}</div>
                     <div className="text-slate-500">{row.source_set_id}</div>
+                    {isMixedPromoBucket(row) && (
+                      <div className="mt-1 rounded border border-amber-900/50 bg-amber-950/30 px-2 py-1 text-2xs text-amber-200">
+                        Mixed promo bucket — ignore unless a single matching Stackt promo set exists
+                      </div>
+                    )}
                   </td>
                   <td className="min-w-[10rem] px-3 py-2 text-xs">
                     <input
@@ -403,6 +415,12 @@ async function loadMasterCardSetCounts() {
 }
 
 function suggestMasterSet(row: ExternalSetMappingRow, masterSets: MasterSetOption[]) {
+  const explicitAlias = explicitSetAlias(row.source_set_name)
+  if (explicitAlias) {
+    const exactAlias = masterSets.find((set) => set.set_abbr.toUpperCase() === explicitAlias)
+    if (exactAlias) return exactAlias
+  }
+
   const sourceName = normalizeSetName(row.source_set_name)
   if (!sourceName) return null
   const exact = masterSets.find((set) => normalizeSetName(set.canonical_set_name) === sourceName)
@@ -416,6 +434,17 @@ function suggestMasterSet(row: ExternalSetMappingRow, masterSets: MasterSetOptio
     const candidate = normalizeSetName(set.canonical_set_name)
     return Boolean(candidate && withoutEra && (candidate.includes(withoutEra) || withoutEra.includes(candidate)))
   }) ?? null
+}
+
+function explicitSetAlias(sourceSetName: string | null | undefined) {
+  const normalized = normalizeSetName(sourceSetName)
+  if (normalized === 'swsh01swordshieldbaseset') return 'SSH'
+  return null
+}
+
+function isMixedPromoBucket(row: ExternalSetMappingRow) {
+  const normalized = normalizeSetName(row.source_set_name)
+  return normalized.includes('promocards') || normalized.includes('promos')
 }
 
 function normalizeSetName(value: string | null | undefined) {
