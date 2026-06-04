@@ -102,6 +102,18 @@ test('uses unpadded master_cards card numbers for older set conventions like Gen
   assert.equal(compared[1].matchStatus, 'MATCHED_EXISTING');
 });
 
+test('strips set abbreviation prefixes from promo card numbers for grouped promo sets', () => {
+  const swshMapping = { ...mapping, sourceSetId: 'swsh-promos', sourceSetName: 'SWSH: Sword & Shield Promo Cards', stacktSetAbbr: 'SWSH' };
+  const candidate = normalizePokemonPriceTrackerCard({ ...baseCard, id: 'swsh307', name: 'Arceus VSTAR - SWSH307', number: 'SWSH307' }, swshMapping);
+  const [compared] = compareMasterCardCandidates([candidate], [
+    { id: 307, cardName: 'Arceus VSTAR', setAbbr: 'SWSH', num: '307', lang: 'ENG' }
+  ]);
+
+  assert.equal(candidate.normalizedNum, '307');
+  assert.equal(compared.normalizedNum, '307');
+  assert.equal(compared.matchStatus, 'MATCHED_EXISTING');
+});
+
 test('flags source rows whose card-number denominator does not match the dominant mapped set total', () => {
   const celMapping = { ...mapping, sourceSetId: 'cel', sourceSetName: 'Celebrations', stacktSetAbbr: 'CEL' };
   const candidates = [

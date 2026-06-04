@@ -139,14 +139,10 @@ export function SetMappingReviewPage() {
     }
     if (!masterSetByAbbr.has(stacktSetAbbr)) {
       const suggestion = suggestMasterSet(row, masterSets)
-      const promoHint = isMixedPromoBucket(row)
-        ? ' This external promo bucket is not one Stackt set; your master_cards uses per-promo strict keys such as SWSH001, SWSH002, etc. Ignore this row for now rather than mapping it to SWSH.'
-        : ''
       const suggestionHint = suggestion
-        ? ` Did you mean ${suggestion.set_abbr}${suggestion.canonical_set_name ? ` (${suggestion.canonical_set_name})` : ''}?`
+        ? ` Existing-set suggestion: ${suggestion.set_abbr}${suggestion.canonical_set_name ? ` (${suggestion.canonical_set_name})` : ''}.`
         : ''
-      setError(`${stacktSetAbbr} is not present in current ENG master_cards/card_sets options.${suggestionHint}${promoHint}`)
-      return
+      setMessage(`Confirming ${stacktSetAbbr} as a new/unpopulated Stackt set mapping. Re-running sync will stage rows as NEW_CARD_CANDIDATE until master_cards has this set.${suggestionHint}`)
     }
 
     setSavingId(row.id)
@@ -286,8 +282,8 @@ export function SetMappingReviewPage() {
                     <div className="font-medium text-slate-100">{row.source_set_name || '—'}</div>
                     <div className="text-slate-500">{row.source_set_id}</div>
                     {isMixedPromoBucket(row) && (
-                      <div className="mt-1 rounded border border-amber-900/50 bg-amber-950/30 px-2 py-1 text-2xs text-amber-200">
-                        Mixed promo bucket — ignore unless a single matching Stackt promo set exists
+                      <div className="mt-1 rounded border border-blue-900/50 bg-blue-950/30 px-2 py-1 text-2xs text-blue-200">
+                        Promo bucket — can map to a grouped promo set like SWSH when Stackt uses set_abbr + promo number
                       </div>
                     )}
                   </td>

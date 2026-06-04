@@ -93,7 +93,7 @@ export const normalizePokemonPriceTrackerCard = (
     normalizedSetAbbr: mapping?.status === 'confirmed' ? normalizeSetAbbr(mapping.stacktSetAbbr) : null,
     // Initial source-derived shape only. compareMasterCardCandidates then rewrites this
     // into the existing master_cards number convention for that set/lang when possible.
-    normalizedNum: normalizeCardNumber(sourceCardNumber),
+    normalizedNum: normalizeCardNumberForSet(sourceCardNumber, mapping?.stacktSetAbbr),
     normalizedLang
   };
 };
@@ -166,6 +166,18 @@ export const compareMasterCardCandidates = (
 
     return withStatus(candidate, 'MATCHED_EXISTING', 'Strict key and card name confirmed against master_cards', existing.id);
   });
+};
+
+export const normalizeCardNumberForSet = (
+  value: string | null | undefined,
+  setAbbr: string | null | undefined
+): string | null => {
+  const compact = compactCardNumber(value);
+  const normalizedSet = normalizeSetAbbr(setAbbr);
+  if (compact && normalizedSet && compact.startsWith(normalizedSet) && /^\d+$/.test(compact.slice(normalizedSet.length))) {
+    return normalizeCardNumber(compact.slice(normalizedSet.length));
+  }
+  return normalizeCardNumber(value);
 };
 
 export const normalizeCardNumber = (value: string | null | undefined): string | null => {
@@ -269,7 +281,7 @@ const resolveCandidateNumberStyle = (
   existingByKey: Map<string, ExistingMasterCard>,
   numberStyleBySetLang: Map<string, NumericNumberStyle>
 ): MasterCardCandidate => {
-  const variants = cardNumberVariants(candidate.sourceCardNumber ?? candidate.normalizedNum);
+  const variants = cardNumberVariants(candidate.sourceCardNumber ?? candidate.normalizedNum, candidate.normalizedSetAbbr);
 
   for (const variant of variants) {
     const key = strictKey(candidate.normalizedSetAbbr, variant, candidate.normalizedLang);
@@ -288,11 +300,18 @@ const resolveCandidateNumberStyle = (
   return { ...candidate, normalizedNum: stripNumericLeadingZeroes(sourceCompact) };
 };
 
-const cardNumberVariants = (value: string | null | undefined): string[] => {
+const cardNumberVariants = (value: string | null | undefined, setAbbr?: string | null | undefined): string[] => {
   const compact = compactCardNumber(value);
   if (!compact) return [];
 
   const variants = new Set<string>([normalizeCardNumber(compact) ?? compact, compact]);
+  const normalizedSet = normalizeSetAbbr(setAbbr);
+  if (normalizedSet && compact.startsWith(normalizedSet) && /^\d+$/.test(compact.slice(normalizedSet.length))) {
+    const strippedSetNumber = stripNumericLeadingZeroes(compact.slice(normalizedSet.length));
+    variants.add(strippedSetNumber);
+    variants.add(strippedSetNumber.padStart(2, '0'));
+    variants.add(strippedSetNumber.padStart(3, '0'));
+  }
   if (/^\d+$/.test(compact)) {
     const stripped = stripNumericLeadingZeroes(compact);
     variants.add(stripped);
