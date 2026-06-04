@@ -11,6 +11,7 @@ import { SlabIntakePage } from './pages/SlabIntakePage'
 import { SalesPackingPage } from './pages/SalesPackingPage'
 import { SlabReconciliationPage } from './pages/SlabReconciliationPage'
 import { MasterCardsReviewPage } from './pages/MasterCardsReviewPage'
+import { SetMappingReviewPage } from './pages/SetMappingReviewPage'
 
 function App() {
   return (
@@ -32,6 +33,7 @@ function App() {
           <Route path="raw-cards" element={<RawCardsPage />} />
           <Route path="raw-cards/add" element={<AddRawCardsPage />} />
           <Route path="master-cards/review" element={<MasterCardsReviewPage />} />
+          <Route path="master-cards/set-mappings" element={<SetMappingReviewPage />} />
           <Route path="sales-packing" element={<SalesPackingPage />} />
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
