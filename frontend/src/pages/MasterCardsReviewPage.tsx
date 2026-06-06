@@ -1,6 +1,10 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { getMasterCardReviewActions, type MasterCardReviewAction } from '../lib/masterCardsReviewActions'
+import {
+  getMasterCardReviewActions,
+  isMasterCardReviewActionable,
+  type MasterCardReviewAction,
+} from '../lib/masterCardsReviewActions'
 
 type MatchStatus =
   | 'MATCHED_EXISTING'
@@ -47,14 +51,6 @@ const FILTERS: Array<{ value: ReviewFilter; label: string }> = [
   { value: 'all', label: 'All' },
 ]
 
-const ACTIONABLE_STATUSES = new Set<MatchStatus>([
-  'CARD_NAME_CONFLICT',
-  'VARIANT_CANDIDATE',
-  'NEW_CARD_CANDIDATE',
-  'SET_MAPPING_NEEDED',
-  'PARSE_INCOMPLETE',
-])
-
 const STATUS_TONE: Record<MatchStatus, string> = {
   MATCHED_EXISTING: 'border-emerald-900/50 bg-emerald-950/40 text-emerald-200',
   NEW_CARD_CANDIDATE: 'border-blue-900/50 bg-blue-950/40 text-blue-200',
@@ -100,7 +96,7 @@ export function MasterCardsReviewPage() {
     const next: Record<string, number> = { all: rows.length, actionable: 0, pending: 0 }
     for (const row of rows) {
       next[row.match_status] = (next[row.match_status] ?? 0) + 1
-      if (ACTIONABLE_STATUSES.has(row.match_status)) next.actionable += 1
+      if (isMasterCardReviewActionable({ matchStatus: row.match_status, reviewStatus: row.review_status })) next.actionable += 1
       if ((row.review_status ?? 'pending') === 'pending') next.pending += 1
     }
     return next
@@ -112,7 +108,7 @@ export function MasterCardsReviewPage() {
       const matchesFilter = activeFilter === 'all'
         ? true
         : activeFilter === 'actionable'
-          ? ACTIONABLE_STATUSES.has(row.match_status)
+          ? isMasterCardReviewActionable({ matchStatus: row.match_status, reviewStatus: row.review_status })
           : activeFilter === 'pending'
             ? (row.review_status ?? 'pending') === 'pending'
             : row.match_status === activeFilter

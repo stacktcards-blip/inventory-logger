@@ -30,3 +30,7 @@ export function getMasterCardReviewActions({
 
   return []
 }
+
+export function isMasterCardReviewActionable(input: MasterCardReviewActionInput): boolean {
+  return getMasterCardReviewActions(input).length > 0
+}
