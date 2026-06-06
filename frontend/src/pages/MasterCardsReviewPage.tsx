@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
+import { getMasterCardReviewActions, type MasterCardReviewAction } from '../lib/masterCardsReviewActions'
 
 type MatchStatus =
   | 'MATCHED_EXISTING'
@@ -218,6 +219,27 @@ export function MasterCardsReviewPage() {
     }
   }
 
+
+  const rejectVariant = async (row: MasterCardImportRow) => {
+    setSavingId(row.id)
+    setError(null)
+    setMessage(null)
+    try {
+      const { error: stagingError } = await supabase
+        .from('master_card_import_staging')
+        .update({ review_status: 'rejected_variant', reviewed_at: new Date().toISOString() })
+        .eq('id', row.id)
+      if (stagingError) throw stagingError
+
+      refreshRow({ id: row.id, review_status: 'rejected_variant', reviewed_at: new Date().toISOString() })
+      setMessage('Rejected variant candidate. Nothing was imported.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not reject variant')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
   const skipParseIncomplete = async (row: MasterCardImportRow) => {
     setSavingId(row.id)
     setError(null)
@@ -309,6 +331,7 @@ export function MasterCardsReviewPage() {
                 saving={savingId === row.id}
                 onApplyApiName={applyApiName}
                 onCreateVariant={createVariant}
+                onRejectVariant={rejectVariant}
                 onSkipParseIncomplete={skipParseIncomplete}
               />
             ))}
@@ -328,12 +351,14 @@ function ReviewRow({
   saving,
   onApplyApiName,
   onCreateVariant,
+  onRejectVariant,
   onSkipParseIncomplete,
 }: {
   row: MasterCardImportRow
   saving: boolean
   onApplyApiName: (row: MasterCardImportRow) => Promise<void>
   onCreateVariant: (row: MasterCardImportRow) => Promise<void>
+  onRejectVariant: (row: MasterCardImportRow) => Promise<void>
   onSkipParseIncomplete: (row: MasterCardImportRow) => Promise<void>
 }) {
   const strictKey = [row.normalized_set_abbr, row.normalized_num, row.normalized_lang].filter(Boolean).join(' / ') || '—'
@@ -360,6 +385,7 @@ function ReviewRow({
           saving={saving}
           onApplyApiName={onApplyApiName}
           onCreateVariant={onCreateVariant}
+          onRejectVariant={onRejectVariant}
           onSkipParseIncomplete={onSkipParseIncomplete}
         />
       </td>
@@ -372,17 +398,21 @@ function RowAction({
   saving,
   onApplyApiName,
   onCreateVariant,
+  onRejectVariant,
   onSkipParseIncomplete,
 }: {
   row: MasterCardImportRow
   saving: boolean
   onApplyApiName: (row: MasterCardImportRow) => Promise<void>
   onCreateVariant: (row: MasterCardImportRow) => Promise<void>
+  onRejectVariant: (row: MasterCardImportRow) => Promise<void>
   onSkipParseIncomplete: (row: MasterCardImportRow) => Promise<void>
 }) {
   const buttonClass = 'rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50'
+  const actions = getMasterCardReviewActions({ matchStatus: row.match_status, reviewStatus: row.review_status })
+  const hasAction = (action: MasterCardReviewAction) => actions.includes(action)
 
-  if (row.match_status === 'CARD_NAME_CONFLICT') {
+  if (hasAction('apply_api_name')) {
     return (
       <button
         type="button"
@@ -395,20 +425,32 @@ function RowAction({
     )
   }
 
-  if (row.match_status === 'VARIANT_CANDIDATE') {
+  if (hasAction('create_variant')) {
     return (
-      <button
-        type="button"
-        disabled={saving || !row.existing_master_card_id || !row.source_card_name}
-        onClick={() => void onCreateVariant(row)}
-        className={`${buttonClass} border-cyan-600/50 bg-cyan-600/20 text-cyan-100 hover:bg-cyan-600/30`}
-      >
-        {saving ? 'Creating…' : 'Create variant'}
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={saving || !row.existing_master_card_id || !row.source_card_name}
+          onClick={() => void onCreateVariant(row)}
+          className={`${buttonClass} border-cyan-600/50 bg-cyan-600/20 text-cyan-100 hover:bg-cyan-600/30`}
+        >
+          {saving ? 'Creating…' : 'Create variant'}
+        </button>
+        {hasAction('reject_variant') && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void onRejectVariant(row)}
+            className={`${buttonClass} border-slate-600/50 bg-slate-900/60 text-slate-300 hover:bg-slate-800`}
+          >
+            {saving ? 'Rejecting…' : 'Reject'}
+          </button>
+        )}
+      </div>
     )
   }
 
-  if (row.match_status === 'PARSE_INCOMPLETE') {
+  if (hasAction('skip_parse_incomplete')) {
     return (
       <button
         type="button"
