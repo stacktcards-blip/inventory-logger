@@ -12,6 +12,12 @@ test('variant candidates can be created or rejected while pending', () => {
   assert.deepEqual(actions, ['create_variant', 'reject_variant'])
 })
 
+test('new card candidates can be created or rejected while pending', () => {
+  const actions = getMasterCardReviewActions({ matchStatus: 'NEW_CARD_CANDIDATE', reviewStatus: 'pending' })
+
+  assert.deepEqual(actions, ['create_master_card', 'reject_new_card'])
+})
+
 
 test('card name conflicts can be applied or rejected while pending', () => {
   const actions = getMasterCardReviewActions({ matchStatus: 'CARD_NAME_CONFLICT', reviewStatus: 'pending' })
@@ -40,8 +46,14 @@ test('rejected variants stay out of the action queue', () => {
   assert.deepEqual(actions, [])
 })
 
+test('created or rejected new cards stay out of the action queue', () => {
+  assert.deepEqual(getMasterCardReviewActions({ matchStatus: 'MATCHED_EXISTING', reviewStatus: 'created_master_card' }), [])
+  assert.deepEqual(getMasterCardReviewActions({ matchStatus: 'NEW_CARD_CANDIDATE', reviewStatus: 'rejected_new_card' }), [])
+})
+
 test('actionable queue only includes pending rows with available actions', () => {
   assert.equal(isMasterCardReviewActionable({ matchStatus: 'VARIANT_CANDIDATE', reviewStatus: 'pending' }), true)
+  assert.equal(isMasterCardReviewActionable({ matchStatus: 'NEW_CARD_CANDIDATE', reviewStatus: 'pending' }), true)
   assert.equal(isMasterCardReviewActionable({ matchStatus: 'CARD_NAME_CONFLICT', reviewStatus: 'applied_api_name' }), false)
   assert.equal(isMasterCardReviewActionable({ matchStatus: 'CARD_NAME_CONFLICT', reviewStatus: 'rejected_card_name_conflict' }), false)
   assert.equal(isMasterCardReviewActionable({ matchStatus: 'VARIANT_CANDIDATE', reviewStatus: 'variant_created' }), false)

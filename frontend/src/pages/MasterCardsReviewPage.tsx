@@ -216,6 +216,122 @@ export function MasterCardsReviewPage() {
   }
 
 
+  const createMasterCard = async (row: MasterCardImportRow) => {
+    const setAbbr = row.normalized_set_abbr?.trim()
+    const num = row.normalized_num?.trim()
+    const lang = row.normalized_lang?.trim() || 'ENG'
+    const cardName = row.normalized_card_name?.trim() || row.source_card_name?.trim()
+    if (!setAbbr || !num || !lang || !cardName) return
+
+    setSavingId(row.id)
+    setError(null)
+    setMessage(null)
+    try {
+      const existing = await supabase
+        .from('master_cards')
+        .select('id')
+        .ilike('set_abbr', setAbbr)
+        .ilike('num', num)
+        .ilike('lang', lang)
+        .maybeSingle()
+      if (existing.error) throw existing.error
+
+      let masterCardId = existing.data?.id as number | undefined
+      if (!masterCardId) {
+        const { data: inserted, error: masterError } = await supabase
+          .from('master_cards')
+          .insert({
+            set_abbr: setAbbr,
+            num,
+            lang,
+            card_name: cardName,
+            rarity: row.source_rarity,
+            rrty: row.source_rarity,
+            set_num: extractSetTotal(row.source_card_number),
+          })
+          .select('id')
+          .single()
+        if (masterError) throw masterError
+        masterCardId = inserted.id as number
+      }
+
+      const imageUrl = getRawPayloadString(row.raw_payload, ['imageCdnUrl800', 'imageCdnUrl', 'imageUrl'])
+      const imageSmallUrl = getRawPayloadString(row.raw_payload, ['imageCdnUrl200', 'imageUrl', 'imageCdnUrl400'])
+      const { error: variantError } = await supabase
+        .from('master_card_variants')
+        .upsert({
+          master_card_id: masterCardId,
+          variant_code: 'BASE',
+          variant_label: 'Regular',
+          rarity: row.source_rarity,
+          source: row.source,
+          source_card_id: row.source_card_id,
+          source_card_name: row.source_card_name,
+          source_card_number: row.source_card_number,
+          image_url: imageUrl,
+          image_small_url: imageSmallUrl,
+          display_order: 0,
+          is_default: true,
+          raw_payload: row.raw_payload,
+          notes: 'Default base variant created from approved NEW_CARD_CANDIDATE staging row',
+        }, { onConflict: 'master_card_id,variant_code' })
+      if (variantError) throw variantError
+
+      const reviewedAt = new Date().toISOString()
+      const matchReason = existing.data?.id
+        ? 'Existing master_cards row found during new-card approval; staging linked to it'
+        : 'Created master_cards row from approved NEW_CARD_CANDIDATE staging row'
+      const { error: stagingError } = await supabase
+        .from('master_card_import_staging')
+        .update({
+          existing_master_card_id: masterCardId,
+          match_status: 'MATCHED_EXISTING',
+          match_reason: matchReason,
+          review_status: 'created_master_card',
+          reviewed_at: reviewedAt,
+        })
+        .eq('id', row.id)
+      if (stagingError) throw stagingError
+
+      refreshRow({
+        id: row.id,
+        existing_master_card_id: masterCardId,
+        match_status: 'MATCHED_EXISTING',
+        match_reason: matchReason,
+        review_status: 'created_master_card',
+        reviewed_at: reviewedAt,
+      })
+      setMessage(`Created master card ${setAbbr} / ${num} / ${lang} / ${cardName}.`)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not create master card')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+
+  const rejectNewCard = async (row: MasterCardImportRow) => {
+    setSavingId(row.id)
+    setError(null)
+    setMessage(null)
+    try {
+      const reviewedAt = new Date().toISOString()
+      const { error: stagingError } = await supabase
+        .from('master_card_import_staging')
+        .update({ review_status: 'rejected_new_card', reviewed_at: reviewedAt })
+        .eq('id', row.id)
+      if (stagingError) throw stagingError
+
+      refreshRow({ id: row.id, review_status: 'rejected_new_card', reviewed_at: reviewedAt })
+      setMessage('Rejected new-card candidate. Nothing was imported.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not reject new-card candidate')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+
   const rejectCardNameConflict = async (row: MasterCardImportRow) => {
     setSavingId(row.id)
     setError(null)
@@ -347,6 +463,8 @@ export function MasterCardsReviewPage() {
                 row={row}
                 saving={savingId === row.id}
                 onApplyApiName={applyApiName}
+                onCreateMasterCard={createMasterCard}
+                onRejectNewCard={rejectNewCard}
                 onRejectCardNameConflict={rejectCardNameConflict}
                 onCreateVariant={createVariant}
                 onRejectVariant={rejectVariant}
@@ -368,6 +486,8 @@ function ReviewRow({
   row,
   saving,
   onApplyApiName,
+  onCreateMasterCard,
+  onRejectNewCard,
   onRejectCardNameConflict,
   onCreateVariant,
   onRejectVariant,
@@ -376,6 +496,8 @@ function ReviewRow({
   row: MasterCardImportRow
   saving: boolean
   onApplyApiName: (row: MasterCardImportRow) => Promise<void>
+  onCreateMasterCard: (row: MasterCardImportRow) => Promise<void>
+  onRejectNewCard: (row: MasterCardImportRow) => Promise<void>
   onRejectCardNameConflict: (row: MasterCardImportRow) => Promise<void>
   onCreateVariant: (row: MasterCardImportRow) => Promise<void>
   onRejectVariant: (row: MasterCardImportRow) => Promise<void>
@@ -404,6 +526,8 @@ function ReviewRow({
           row={row}
           saving={saving}
           onApplyApiName={onApplyApiName}
+          onCreateMasterCard={onCreateMasterCard}
+          onRejectNewCard={onRejectNewCard}
           onRejectCardNameConflict={onRejectCardNameConflict}
           onCreateVariant={onCreateVariant}
           onRejectVariant={onRejectVariant}
@@ -418,6 +542,8 @@ function RowAction({
   row,
   saving,
   onApplyApiName,
+  onCreateMasterCard,
+  onRejectNewCard,
   onRejectCardNameConflict,
   onCreateVariant,
   onRejectVariant,
@@ -426,6 +552,8 @@ function RowAction({
   row: MasterCardImportRow
   saving: boolean
   onApplyApiName: (row: MasterCardImportRow) => Promise<void>
+  onCreateMasterCard: (row: MasterCardImportRow) => Promise<void>
+  onRejectNewCard: (row: MasterCardImportRow) => Promise<void>
   onRejectCardNameConflict: (row: MasterCardImportRow) => Promise<void>
   onCreateVariant: (row: MasterCardImportRow) => Promise<void>
   onRejectVariant: (row: MasterCardImportRow) => Promise<void>
@@ -434,6 +562,32 @@ function RowAction({
   const buttonClass = 'rounded-md border px-3 py-1.5 text-xs font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50'
   const actions = getMasterCardReviewActions({ matchStatus: row.match_status, reviewStatus: row.review_status })
   const hasAction = (action: MasterCardReviewAction) => actions.includes(action)
+
+  if (hasAction('create_master_card')) {
+    const missingRequiredFields = !row.normalized_set_abbr || !row.normalized_num || !row.normalized_lang || !(row.normalized_card_name || row.source_card_name)
+    return (
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={saving || missingRequiredFields}
+          onClick={() => void onCreateMasterCard(row)}
+          className={`${buttonClass} border-blue-600/50 bg-blue-600/20 text-blue-100 hover:bg-blue-600/30`}
+        >
+          {saving ? 'Creating…' : 'Create master card'}
+        </button>
+        {hasAction('reject_new_card') && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void onRejectNewCard(row)}
+            className={`${buttonClass} border-slate-600/50 bg-slate-900/60 text-slate-300 hover:bg-slate-800`}
+          >
+            {saving ? 'Rejecting…' : 'Reject'}
+          </button>
+        )}
+      </div>
+    )
+  }
 
   if (hasAction('apply_api_name')) {
     return (
@@ -516,4 +670,19 @@ function inferVariantCode(sourceName: string, fallback: string) {
   const source = parenthetical || fallback
   const cleaned = source.toUpperCase().replace(/[^A-Z0-9]+/g, '_').replace(/^_+|_+$/g, '')
   return cleaned.slice(0, 40) || `VARIANT_${fallback}`
+}
+
+function extractSetTotal(sourceCardNumber: string | null) {
+  const total = sourceCardNumber?.match(/\/([A-Za-z0-9-]+)$/)?.[1]?.trim()
+  return total || null
+}
+
+function getRawPayloadString(rawPayload: unknown, keys: string[]) {
+  if (!rawPayload || typeof rawPayload !== 'object') return null
+  const payload = rawPayload as Record<string, unknown>
+  for (const key of keys) {
+    const value = payload[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return null
 }
