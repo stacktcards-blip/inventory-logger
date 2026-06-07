@@ -146,19 +146,20 @@ export const compareMasterCardCandidates = (
     }
 
     const existing = key ? existingByKey.get(key) : undefined;
+    if (!existing) {
+      if (key) seenCandidateKeys.add(key);
+      return withStatus(candidate, 'NEW_CARD_CANDIDATE', 'Strict key not found in master_cards', null);
+    }
+
     if (key && (candidateKeyCounts.get(key) ?? 0) > 1 && seenCandidateKeys.has(key)) {
       return withStatus(
         candidate,
         'VARIANT_CANDIDATE',
         'Multiple source cards share the same strict key; review as a possible variant/printing under the base master_card',
-        existing?.id ?? null
+        existing.id
       );
     }
     if (key) seenCandidateKeys.add(key);
-
-    if (!existing) {
-      return withStatus(candidate, 'NEW_CARD_CANDIDATE', 'Strict key not found in master_cards', null);
-    }
 
     if (!baseCardNamesConfirm(candidate.normalizedCardName, existing.cardName)) {
       return withStatus(candidate, 'CARD_NAME_CONFLICT', 'Strict key exists but source card name differs from master_cards card_name', existing.id);

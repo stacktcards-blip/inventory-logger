@@ -81,7 +81,23 @@ test('classifies staged candidates against existing master_cards records', () =>
   assert.equal(compared[2].normalizedNum, '003');
   assert.equal(compared[2].matchStatus, 'NEW_CARD_CANDIDATE');
   assert.equal(compared[3].normalizedNum, '003');
-  assert.equal(compared[3].matchStatus, 'VARIANT_CANDIDATE');
+  assert.equal(compared[3].matchStatus, 'NEW_CARD_CANDIDATE');
+});
+
+test('only marks duplicate source rows as variants when a base master_card exists', () => {
+  const candidates = [
+    normalizePokemonPriceTrackerCard({ ...baseCard, id: 'sv1-base', name: 'Quaxly', number: '003/198' }, mapping),
+    normalizePokemonPriceTrackerCard({ ...baseCard, id: 'sv1-variant', name: 'Quaxly Stamped', number: '003/198' }, mapping)
+  ];
+
+  const compared = compareMasterCardCandidates(candidates, [
+    { id: 12, cardName: 'Quaxly', setAbbr: 'SVI', num: '003', lang: 'ENG' }
+  ]);
+
+  assert.equal(compared[0].matchStatus, 'MATCHED_EXISTING');
+  assert.equal(compared[0].existingMasterCardId, 12);
+  assert.equal(compared[1].matchStatus, 'VARIANT_CANDIDATE');
+  assert.equal(compared[1].existingMasterCardId, 12);
 });
 
 test('uses unpadded master_cards card numbers for older set conventions like Generations', () => {
