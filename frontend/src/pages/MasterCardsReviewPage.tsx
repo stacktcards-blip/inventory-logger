@@ -73,13 +73,29 @@ export function MasterCardsReviewPage() {
     setLoading(true)
     setError(null)
     try {
-      const { data, error: queryError } = await supabase
-        .from('master_card_import_staging')
-        .select('*')
-        .order('updated_at', { ascending: false })
-        .limit(1000)
-      if (queryError) throw queryError
-      setRows((data ?? []) as MasterCardImportRow[])
+      const actionableStatuses: MatchStatus[] = ['CARD_NAME_CONFLICT', 'VARIANT_CANDIDATE', 'NEW_CARD_CANDIDATE']
+      const [actionableResult, recentResult] = await Promise.all([
+        supabase
+          .from('master_card_import_staging')
+          .select('*')
+          .eq('review_status', 'pending')
+          .in('match_status', actionableStatuses)
+          .order('updated_at', { ascending: false })
+          .limit(1000),
+        supabase
+          .from('master_card_import_staging')
+          .select('*')
+          .order('updated_at', { ascending: false })
+          .limit(1000),
+      ])
+      if (actionableResult.error) throw actionableResult.error
+      if (recentResult.error) throw recentResult.error
+
+      const byId = new Map<number, MasterCardImportRow>()
+      for (const row of [...(actionableResult.data ?? []), ...(recentResult.data ?? [])] as MasterCardImportRow[]) {
+        byId.set(row.id, row)
+      }
+      setRows(Array.from(byId.values()))
     } catch (e) {
       setRows([])
       setError(e instanceof Error ? e.message : 'Could not load master card import staging rows')
