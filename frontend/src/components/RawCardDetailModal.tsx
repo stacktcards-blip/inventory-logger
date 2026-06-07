@@ -140,6 +140,17 @@ export function RawCardDetailModal({
           )}
           {rawCard && !loading && (
             <>
+              {(rawCard.image_url ?? rawCard.image_small_url) && (
+                <div className="flex justify-center rounded-lg border border-slate-700/50 bg-slate-950/40 p-4">
+                  <img
+                    src={rawCard.image_url ?? rawCard.image_small_url ?? ''}
+                    alt={rawCard.card_name ?? 'Raw card'}
+                    className="max-h-72 rounded object-contain shadow-lg shadow-black/30"
+                    loading="lazy"
+                  />
+                </div>
+              )}
+
               <section>
                 <h3 className="mb-2 text-2xs font-semibold uppercase tracking-wider text-slate-500">
                   Card identity (read-only)

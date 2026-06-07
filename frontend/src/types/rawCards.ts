@@ -11,12 +11,16 @@ export type RawCardRow = {
   purchase_price: number | null
   exchange_rate: number | null
   currency: string | null
+  gst_relevant: boolean | null
+  lot_label: string | null
   seller: string | null
   purchase_date: string | null
   note: string | null
   card_name: string | null
   rrty: string | null
   rarity: string | null
+  image_url: string | null
+  image_small_url: string | null
 }
 
 /** Draft row for the Add Raw Cards page (no id, card_name looked up from master_cards) */

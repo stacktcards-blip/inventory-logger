@@ -324,6 +324,28 @@ export function RawCardsTable({
         />
       ),
     },
+    {
+      id: 'image',
+      header: 'Img',
+      cell: ({ row }) => {
+        const imageUrl = row.original.image_small_url ?? row.original.image_url
+        return imageUrl ? (
+          <img
+            src={imageUrl}
+            alt={row.original.card_name ?? 'Raw card'}
+            className="h-12 w-9 rounded bg-slate-950/60 object-contain ring-1 ring-slate-700/70"
+            loading="lazy"
+          />
+        ) : (
+          <div
+            className="flex h-12 w-9 items-center justify-center rounded bg-slate-900/70 text-[10px] text-slate-600 ring-1 ring-slate-800"
+            title="No image cached"
+          >
+            —
+          </div>
+        )
+      },
+    },
     { accessorKey: 'id', header: 'ID', cell: (info) => info.getValue() ?? '—' },
     {
       accessorKey: 'card_name',
