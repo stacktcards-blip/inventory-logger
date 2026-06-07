@@ -216,6 +216,27 @@ export function MasterCardsReviewPage() {
   }
 
 
+  const rejectCardNameConflict = async (row: MasterCardImportRow) => {
+    setSavingId(row.id)
+    setError(null)
+    setMessage(null)
+    try {
+      const { error: stagingError } = await supabase
+        .from('master_card_import_staging')
+        .update({ review_status: 'rejected_card_name_conflict', reviewed_at: new Date().toISOString() })
+        .eq('id', row.id)
+      if (stagingError) throw stagingError
+
+      refreshRow({ id: row.id, review_status: 'rejected_card_name_conflict', reviewed_at: new Date().toISOString() })
+      setMessage('Rejected card name conflict. master_cards was not changed.')
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Could not reject card name conflict')
+    } finally {
+      setSavingId(null)
+    }
+  }
+
+
   const rejectVariant = async (row: MasterCardImportRow) => {
     setSavingId(row.id)
     setError(null)
@@ -326,6 +347,7 @@ export function MasterCardsReviewPage() {
                 row={row}
                 saving={savingId === row.id}
                 onApplyApiName={applyApiName}
+                onRejectCardNameConflict={rejectCardNameConflict}
                 onCreateVariant={createVariant}
                 onRejectVariant={rejectVariant}
                 onSkipParseIncomplete={skipParseIncomplete}
@@ -346,6 +368,7 @@ function ReviewRow({
   row,
   saving,
   onApplyApiName,
+  onRejectCardNameConflict,
   onCreateVariant,
   onRejectVariant,
   onSkipParseIncomplete,
@@ -353,6 +376,7 @@ function ReviewRow({
   row: MasterCardImportRow
   saving: boolean
   onApplyApiName: (row: MasterCardImportRow) => Promise<void>
+  onRejectCardNameConflict: (row: MasterCardImportRow) => Promise<void>
   onCreateVariant: (row: MasterCardImportRow) => Promise<void>
   onRejectVariant: (row: MasterCardImportRow) => Promise<void>
   onSkipParseIncomplete: (row: MasterCardImportRow) => Promise<void>
@@ -380,6 +404,7 @@ function ReviewRow({
           row={row}
           saving={saving}
           onApplyApiName={onApplyApiName}
+          onRejectCardNameConflict={onRejectCardNameConflict}
           onCreateVariant={onCreateVariant}
           onRejectVariant={onRejectVariant}
           onSkipParseIncomplete={onSkipParseIncomplete}
@@ -393,6 +418,7 @@ function RowAction({
   row,
   saving,
   onApplyApiName,
+  onRejectCardNameConflict,
   onCreateVariant,
   onRejectVariant,
   onSkipParseIncomplete,
@@ -400,6 +426,7 @@ function RowAction({
   row: MasterCardImportRow
   saving: boolean
   onApplyApiName: (row: MasterCardImportRow) => Promise<void>
+  onRejectCardNameConflict: (row: MasterCardImportRow) => Promise<void>
   onCreateVariant: (row: MasterCardImportRow) => Promise<void>
   onRejectVariant: (row: MasterCardImportRow) => Promise<void>
   onSkipParseIncomplete: (row: MasterCardImportRow) => Promise<void>
@@ -410,14 +437,26 @@ function RowAction({
 
   if (hasAction('apply_api_name')) {
     return (
-      <button
-        type="button"
-        disabled={saving || !row.existing_master_card_id || !row.source_card_name}
-        onClick={() => void onApplyApiName(row)}
-        className={`${buttonClass} border-amber-600/50 bg-amber-600/20 text-amber-100 hover:bg-amber-600/30`}
-      >
-        {saving ? 'Applying…' : 'Use API name'}
-      </button>
+      <div className="flex gap-2">
+        <button
+          type="button"
+          disabled={saving || !row.existing_master_card_id || !row.source_card_name}
+          onClick={() => void onApplyApiName(row)}
+          className={`${buttonClass} border-amber-600/50 bg-amber-600/20 text-amber-100 hover:bg-amber-600/30`}
+        >
+          {saving ? 'Applying…' : 'Use API name'}
+        </button>
+        {hasAction('reject_card_name_conflict') && (
+          <button
+            type="button"
+            disabled={saving}
+            onClick={() => void onRejectCardNameConflict(row)}
+            className={`${buttonClass} border-slate-600/50 bg-slate-900/60 text-slate-300 hover:bg-slate-800`}
+          >
+            {saving ? 'Rejecting…' : 'Reject'}
+          </button>
+        )}
+      </div>
     )
   }
 

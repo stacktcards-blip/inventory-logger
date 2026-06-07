@@ -8,6 +8,7 @@ export type MasterCardReviewMatchStatus =
 
 export type MasterCardReviewAction =
   | 'apply_api_name'
+  | 'reject_card_name_conflict'
   | 'create_variant'
   | 'reject_variant'
   | 'skip_parse_incomplete'
@@ -24,7 +25,7 @@ export function getMasterCardReviewActions({
   const status = reviewStatus ?? 'pending'
   if (status !== 'pending') return []
 
-  if (matchStatus === 'CARD_NAME_CONFLICT') return ['apply_api_name']
+  if (matchStatus === 'CARD_NAME_CONFLICT') return ['apply_api_name', 'reject_card_name_conflict']
   if (matchStatus === 'VARIANT_CANDIDATE') return ['create_variant', 'reject_variant']
   if (matchStatus === 'PARSE_INCOMPLETE') return ['skip_parse_incomplete']
 
