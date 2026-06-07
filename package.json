@@ -9,7 +9,8 @@
     "start": "node dist/index.js",
     "pretest": "tsc -p tsconfig.build.json",
     "test": "node --test",
-    "master-cards:sync:eng": "tsx src/scripts/syncMasterCardsEnglish.ts"
+    "master-cards:sync:eng": "tsx src/scripts/syncMasterCardsEnglish.ts",
+    "images:backfill:tcgdex": "tsx src/scripts/backfillTcgdexImageCache.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",
