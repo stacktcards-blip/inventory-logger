@@ -70,13 +70,25 @@ function queryRawKeys(): RawKey[] {
   const missingPreviewClause = includeAll ? '' : 'and r.image_url is null and r.image_small_url is null';
   const sql = `
 copy (
+  with unique_set_lang as (
+    select
+      lower(trim(set_abbr)) as set_abbr_key,
+      min(trim(lang)) as inferred_lang
+    from master_cards
+    where set_abbr is not null and trim(set_abbr) <> ''
+      and lang is not null and trim(lang) <> ''
+    group by lower(trim(set_abbr))
+    having count(distinct lower(trim(lang))) = 1
+  )
   select
     btrim(r.set_abbr) as set_abbr,
     btrim(r.num) as card_num,
-    btrim(r.lang) as lang,
+    btrim(coalesce(nullif(trim(r.lang), ''), usl.inferred_lang)) as lang,
     coalesce(max(cs.canonical_set_name), '') as canonical_set_name,
     count(*)::int as raw_rows
   from raw_cards_enriched r
+  left join unique_set_lang usl
+    on usl.set_abbr_key = lower(trim(r.set_abbr))
   left join card_sets cs
     on lower(cs.set_abbr) = lower(r.set_abbr)
    and (
@@ -91,7 +103,7 @@ copy (
        else lower(trim(cs.lang))
      end
    ) = (
-     case lower(trim(r.lang))
+     case lower(trim(coalesce(nullif(trim(r.lang), ''), usl.inferred_lang)))
        when 'eng' then 'en'
        when 'en' then 'en'
        when 'english' then 'en'
@@ -99,12 +111,13 @@ copy (
        when 'jp' then 'ja'
        when 'ja' then 'ja'
        when 'japanese' then 'ja'
-       else lower(trim(r.lang))
+       else lower(trim(coalesce(nullif(trim(r.lang), ''), usl.inferred_lang)))
      end
    )
   where r.set_abbr is not null and btrim(r.set_abbr) <> ''
     and r.num is not null and btrim(r.num) <> ''
-    and r.lang is not null and btrim(r.lang) <> ''
+    and coalesce(nullif(trim(r.lang), ''), usl.inferred_lang) is not null
+    and btrim(coalesce(nullif(trim(r.lang), ''), usl.inferred_lang)) <> ''
     ${missingPreviewClause}
   group by 1,2,3
   order by count(*) desc, 1,2,3
