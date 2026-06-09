@@ -33,6 +33,7 @@ export function AppLayout() {
       <header className="border-b border-base-border/80 bg-gradient-to-b from-slate-900/95 via-slate-900/90 to-slate-900/95 backdrop-blur-sm">
         <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3 sm:px-6 lg:px-8">
           <nav className="flex items-center gap-1">
+            {navLink('/dashboard', 'Dashboard')}
             {navLink('/', 'Slabs')}
             {navLink('/slabs/reconciliation', 'Slab Reconciliation')}
             {navLink('/slab-intake', 'Slab Intake')}
