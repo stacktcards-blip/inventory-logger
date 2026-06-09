@@ -1,6 +1,7 @@
 import { fetchEbayOrdersPage, refreshEbayAccessToken, type EbayFulfillmentOrder } from './ebayFulfillmentClient.js';
 import { getEbayOAuthTokenForSync, updateEbayAccessToken } from '../repositories/ebayOAuthTokensRepo.js';
 import { completeEbaySyncLog, logEbaySyncStart, upsertEbaySalesOrders } from '../repositories/ebaySalesRepo.js';
+import { autoMatchSalesBySku } from './ebaySalesMatchingService.js';
 
 export type EbaySalesSyncSummary = {
   storeAccount: string;
@@ -9,6 +10,8 @@ export type EbaySalesSyncSummary = {
   endDate: string;
   ordersFetched: number;
   lineItemsUpserted: number;
+  autoMatchReviewed: number;
+  autoMatchMatched: number;
 };
 
 const MAX_DAYS_BACK = 30;
@@ -55,6 +58,7 @@ export async function syncEbaySalesReadOnly(params: {
     }
 
     const result = await upsertEbaySalesOrders(orders);
+    const matching = await autoMatchSalesBySku({ soldSince: startDate.toISOString().slice(0, 10) });
     await completeEbaySyncLog(syncLogId, 'success', result);
 
     return {
@@ -64,6 +68,8 @@ export async function syncEbaySalesReadOnly(params: {
       endDate: endDate.toISOString(),
       ordersFetched: result.ordersFetched,
       lineItemsUpserted: result.lineItemsUpserted,
+      autoMatchReviewed: matching.salesReviewed,
+      autoMatchMatched: matching.salesMatched,
     };
   } catch (error) {
     await completeEbaySyncLog(syncLogId, 'failed', {

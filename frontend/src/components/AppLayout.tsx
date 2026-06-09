@@ -42,6 +42,7 @@ export function AppLayout() {
             {navLink('/raw-cards/add', 'Add raw cards', true)}
             {navLink('/master-cards/review', 'Master Cards')}
             {navLink('/master-cards/set-mappings', 'Set Mappings')}
+            {navLink('/sales', 'Sales Ledger')}
             {navLink('/sales-packing', 'Sales Packing')}
           </nav>
           <div className="flex items-center gap-4">

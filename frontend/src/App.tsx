@@ -13,6 +13,7 @@ import { SlabReconciliationPage } from './pages/SlabReconciliationPage'
 import { MasterCardsReviewPage } from './pages/MasterCardsReviewPage'
 import { SetMappingReviewPage } from './pages/SetMappingReviewPage'
 import { OperationsDashboardPage } from './pages/OperationsDashboardPage'
+import { SalesLedgerPage } from './pages/SalesLedgerPage'
 
 function App() {
   return (
@@ -29,6 +30,7 @@ function App() {
         >
           <Route index element={<SlabsPage />} />
           <Route path="dashboard" element={<OperationsDashboardPage />} />
+          <Route path="sales" element={<SalesLedgerPage />} />
           <Route path="slab-intake" element={<SlabIntakePage />} />
           <Route path="slabs/reconciliation" element={<SlabReconciliationPage />} />
           <Route path="grading-orders" element={<GradingOrdersPage />} />

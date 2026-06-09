@@ -1,4 +1,5 @@
 import { supabase } from './supabase'
+import type { SalesLedgerQueryParams, SalesLedgerResponse } from '../types/salesLedger'
 
 const API_BASE = import.meta.env.VITE_API_URL ?? 'http://localhost:4000'
 
@@ -30,6 +31,8 @@ export type EbaySalesSyncSummary = {
   endDate: string
   ordersFetched: number
   lineItemsUpserted: number
+  autoMatchReviewed: number
+  autoMatchMatched: number
 }
 
 export async function syncEbaySales(daysBack = 7): Promise<EbaySalesSyncSummary> {
@@ -38,4 +41,17 @@ export async function syncEbaySales(daysBack = 7): Promise<EbaySalesSyncSummary>
     { method: 'POST' }
   )
   return result.summary
+}
+
+export async function fetchSalesLedger(params: SalesLedgerQueryParams = {}): Promise<SalesLedgerResponse> {
+  const search = new URLSearchParams()
+  if (params.startDate) search.set('startDate', params.startDate)
+  if (params.endDate) search.set('endDate', params.endDate)
+  if (params.matchStatus) search.set('matchStatus', params.matchStatus)
+  if (params.fulfillmentStatus) search.set('fulfillmentStatus', params.fulfillmentStatus)
+  if (params.search) search.set('search', params.search)
+  if (typeof params.limit === 'number') search.set('limit', String(params.limit))
+  if (typeof params.offset === 'number') search.set('offset', String(params.offset))
+  const query = search.toString() ? `?${search.toString()}` : ''
+  return request<SalesLedgerResponse>(`/ebay/sales/ledger${query}`)
 }

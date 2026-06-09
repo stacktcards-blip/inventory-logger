@@ -637,14 +637,22 @@ function EbaySalesPanel({ sales, onSync }: { sales: EbaySalesPanelState; onSync:
             Pulls 2stackt Sell Fulfillment orders into `ebay_sales` for visibility only. It does not mark slabs sold or change inventory.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={onSync}
-          disabled={sales.syncing}
-          className="rounded-md border border-blue-700/70 bg-blue-900/40 px-3 py-2 text-xs font-semibold text-blue-100 hover:bg-blue-800/60 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {syncLabel}
-        </button>
+        <div className="flex flex-wrap items-center gap-2">
+          <Link
+            to="/sales"
+            className="rounded-md border border-blue-600/70 bg-blue-900/30 px-3 py-2 text-xs font-semibold text-blue-100 hover:bg-blue-800/60"
+          >
+            Open Sales Ledger
+          </Link>
+          <button
+            type="button"
+            onClick={onSync}
+            disabled={sales.syncing}
+            className="rounded-md border border-blue-700/70 bg-blue-900/40 px-3 py-2 text-xs font-semibold text-blue-100 hover:bg-blue-800/60 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {syncLabel}
+          </button>
+        </div>
       </div>
 
       {sales.error && (
@@ -663,7 +671,16 @@ function EbaySalesPanel({ sales, onSync }: { sales: EbaySalesPanelState; onSync:
       <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
         <span>Last sync: <span className="text-slate-200">{lastSync}</span></span>
         {sales.lastSync && <span>Last result: <span className="text-slate-200">{sales.lastSync.orders_fetched ?? 0} orders / {sales.lastSync.sales_created ?? 0} line items</span></span>}
-        {sales.lastSyncSummary && <span>Just synced: <span className="text-slate-200">{sales.lastSyncSummary.ordersFetched} orders / {sales.lastSyncSummary.lineItemsUpserted} line items</span></span>}
+        {sales.lastSyncSummary && (
+          <span>
+            Just synced: <span className="text-slate-200">{sales.lastSyncSummary.ordersFetched} orders / {sales.lastSyncSummary.lineItemsUpserted} line items</span>
+          </span>
+        )}
+        {sales.lastSyncSummary && (
+          <span>
+            Auto-match: <span className="text-slate-200">{sales.lastSyncSummary.autoMatchMatched} linked / {sales.lastSyncSummary.autoMatchReviewed} reviewed</span>
+          </span>
+        )}
       </div>
 
       <div className="mt-4 space-y-2">
