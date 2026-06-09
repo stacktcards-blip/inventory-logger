@@ -4,6 +4,8 @@ import { jobsRouter } from './routes/jobs.js';
 import { sourcesRouter } from './routes/sources.js';
 import { draftsRouter } from './routes/drafts.js';
 import { slabIntakeRouter } from './routes/slabIntake.js';
+import { ebayOAuthProtectedRouter, ebayOAuthPublicRouter } from './routes/ebayOAuth.js';
+import { ebaySalesRouter } from './routes/ebaySales.js';
 import { corsMiddleware, requireCorsConfiguration } from './middleware/cors.js';
 import { requireAuthenticatedUser, requireAuthConfiguration } from './middleware/auth.js';
 
@@ -22,12 +24,16 @@ app.get('/healthz', (_req: express.Request, res: express.Response) => {
   res.json({ status: 'ok' });
 });
 
+app.use('/ebay/oauth', ebayOAuthPublicRouter);
+
 app.use(requireAuthenticatedUser);
 
 app.use('/jobs', jobsRouter);
 app.use('/sources', sourcesRouter);
 app.use('/drafts', draftsRouter);
 app.use('/slab-intake', slabIntakeRouter);
+app.use('/ebay/oauth', ebayOAuthProtectedRouter);
+app.use('/ebay/sales', ebaySalesRouter);
 
 app.use((err: Error, _req: express.Request, res: express.Response, _next: express.NextFunction) => {
   logger.error({ err }, 'Unhandled error');

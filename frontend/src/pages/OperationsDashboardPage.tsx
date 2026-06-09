@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Link } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
+import { syncEbaySales, type EbaySalesSyncSummary } from '../lib/ebaySalesApi'
 
 type QueueTone = 'danger' | 'warn' | 'info' | 'good'
 
@@ -72,6 +73,39 @@ type MasterCardSampleRow = {
   num: string | null
   lang: string | null
   card_name: string | null
+}
+
+type EbaySaleRow = {
+  id: string
+  title: string | null
+  quantity: number | null
+  sale_price: number | null
+  currency: string | null
+  sold_date: string | null
+  buyer_username: string | null
+  fulfillment_status: string | null
+  updated_at: string | null
+}
+
+type EbaySyncLogRow = {
+  status: string | null
+  orders_fetched: number | null
+  sales_created: number | null
+  completed_at: string | null
+  error_message: string | null
+}
+
+type EbaySalesPanelState = {
+  loading: boolean
+  syncing: boolean
+  error: string | null
+  totalRows: number | null
+  last7Revenue: number
+  last7LineItems: number
+  unfulfilledCount: number | null
+  recentSales: EbaySaleRow[]
+  lastSync: EbaySyncLogRow | null
+  lastSyncSummary: EbaySalesSyncSummary | null
 }
 
 type SupabaseFilterQuery = any
@@ -199,6 +233,67 @@ async function queryMasterCardsMissingNames(): Promise<{ count: number | null; s
   return { count: count ?? 0, samples: (data ?? []) as MasterCardSampleRow[] }
 }
 
+const emptyEbaySalesPanel = (): EbaySalesPanelState => ({
+  loading: true,
+  syncing: false,
+  error: null,
+  totalRows: null,
+  last7Revenue: 0,
+  last7LineItems: 0,
+  unfulfilledCount: null,
+  recentSales: [],
+  lastSync: null,
+  lastSyncSummary: null,
+})
+
+async function queryEbaySalesPanel(): Promise<Omit<EbaySalesPanelState, 'loading' | 'syncing' | 'error' | 'lastSyncSummary'>> {
+  const since = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString().slice(0, 10)
+
+  const { count: totalRows, error: totalError } = await supabase
+    .from('ebay_sales')
+    .select('id', { count: 'exact', head: true })
+  if (totalError) throw totalError
+
+  const { count: unfulfilledCount, error: unfulfilledError } = await supabase
+    .from('ebay_sales')
+    .select('id', { count: 'exact', head: true })
+    .in('fulfillment_status', ['NOT_STARTED', 'IN_PROGRESS'])
+  if (unfulfilledError) throw unfulfilledError
+
+  const { data: last7Rows, error: last7Error } = await supabase
+    .from('ebay_sales')
+    .select('id, quantity, sale_price, currency, sold_date, fulfillment_status, title, buyer_username, updated_at')
+    .gte('sold_date', since)
+  if (last7Error) throw last7Error
+
+  const { data: recentSales, error: recentError } = await supabase
+    .from('ebay_sales')
+    .select('id, quantity, sale_price, currency, sold_date, fulfillment_status, title, buyer_username, updated_at')
+    .order('sold_date', { ascending: false, nullsFirst: false })
+    .order('updated_at', { ascending: false, nullsFirst: false })
+    .limit(5)
+  if (recentError) throw recentError
+
+  const { data: syncLogs, error: syncLogError } = await supabase
+    .from('ebay_sync_log')
+    .select('status, orders_fetched, sales_created, completed_at, error_message')
+    .order('completed_at', { ascending: false, nullsFirst: false })
+    .limit(1)
+  if (syncLogError) throw syncLogError
+
+  const typedLast7Rows = (last7Rows ?? []) as EbaySaleRow[]
+  const last7Revenue = typedLast7Rows.reduce((sum, row) => sum + Number(row.sale_price ?? 0), 0)
+
+  return {
+    totalRows: totalRows ?? 0,
+    last7Revenue,
+    last7LineItems: typedLast7Rows.length,
+    unfulfilledCount: unfulfilledCount ?? 0,
+    recentSales: (recentSales ?? []) as EbaySaleRow[],
+    lastSync: ((syncLogs ?? [])[0] ?? null) as EbaySyncLogRow | null,
+  }
+}
+
 function emptyQueues(): DashboardQueue[] {
   return [
     {
@@ -297,10 +392,54 @@ function emptyQueues(): DashboardQueue[] {
 
 export function OperationsDashboardPage() {
   const [queues, setQueues] = useState<DashboardQueue[]>(emptyQueues)
+  const [ebaySales, setEbaySales] = useState<EbaySalesPanelState>(emptyEbaySalesPanel)
   const [lastLoadedAt, setLastLoadedAt] = useState<Date | null>(null)
+
+  const loadEbaySales = useCallback(async () => {
+    setEbaySales((current) => ({ ...current, loading: true, error: null }))
+    try {
+      const result = await queryEbaySalesPanel()
+      setEbaySales((current) => ({
+        ...current,
+        ...result,
+        loading: false,
+        error: null,
+      }))
+    } catch (error) {
+      setEbaySales((current) => ({
+        ...current,
+        loading: false,
+        error: error instanceof Error ? error.message : 'Could not load eBay sales',
+      }))
+    }
+  }, [])
+
+  const handleSyncEbaySales = useCallback(async () => {
+    setEbaySales((current) => ({ ...current, syncing: true, error: null }))
+    try {
+      const summary = await syncEbaySales(7)
+      const result = await queryEbaySalesPanel()
+      setEbaySales((current) => ({
+        ...current,
+        ...result,
+        loading: false,
+        syncing: false,
+        error: null,
+        lastSyncSummary: summary,
+      }))
+      setLastLoadedAt(new Date())
+    } catch (error) {
+      setEbaySales((current) => ({
+        ...current,
+        syncing: false,
+        error: error instanceof Error ? error.message : 'Could not sync eBay sales',
+      }))
+    }
+  }, [])
 
   const loadDashboard = useCallback(async () => {
     setQueues(emptyQueues())
+    void loadEbaySales()
 
     const jobs: Array<Promise<DashboardQueue>> = [
       querySlabQueue((query) => query.or('cert.is.null,cert.eq.,grading_company.is.null,grading_company.eq.,grade.is.null,grade.eq.,set_abbr.is.null,set_abbr.eq.,num.is.null,num.eq.,lang.is.null,lang.eq.,card_name.is.null,card_name.eq.'))
@@ -401,7 +540,7 @@ export function OperationsDashboardPage() {
       }
     }))
     setLastLoadedAt(new Date())
-  }, [])
+  }, [loadEbaySales])
 
   useEffect(() => {
     void loadDashboard()
@@ -444,6 +583,8 @@ export function OperationsDashboardPage() {
         <DashboardMetric label="Last refresh" value={lastLoadedAt ? lastLoadedAt.toLocaleTimeString() : 'Loading…'} tone="default" />
       </div>
 
+      <EbaySalesPanel sales={ebaySales} onSync={() => void handleSyncEbaySales()} />
+
       <div className="rounded-lg border border-base-border/80 bg-gradient-to-b from-slate-800/40 to-slate-900/60 p-4 text-sm text-slate-300 shadow-lg shadow-black/20">
         <div className="font-semibold text-slate-100">How to use this MVP</div>
         <p className="mt-1 text-xs text-slate-400">
@@ -476,6 +617,75 @@ function DashboardMetric({ label, value, tone }: { label: string; value: string;
       <div className="text-2xs font-semibold uppercase tracking-wider text-slate-500">{label}</div>
       <div className="mt-1 text-lg font-semibold">{value}</div>
     </div>
+  )
+}
+
+function formatCurrency(value: number): string {
+  return new Intl.NumberFormat('en-AU', { style: 'currency', currency: 'AUD', maximumFractionDigits: 0 }).format(value)
+}
+
+function EbaySalesPanel({ sales, onSync }: { sales: EbaySalesPanelState; onSync: () => void }) {
+  const lastSync = sales.lastSync?.completed_at ? new Date(sales.lastSync.completed_at).toLocaleString() : 'Not synced yet'
+  const syncLabel = sales.syncing ? 'Syncing…' : 'Sync eBay sales now'
+
+  return (
+    <section className="rounded-lg border border-blue-800/60 bg-blue-950/20 p-4 shadow-lg shadow-black/20">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-base font-semibold text-slate-100">eBay Sales Sync — read only</h2>
+          <p className="mt-1 max-w-3xl text-xs text-slate-400">
+            Pulls 2stackt Sell Fulfillment orders into `ebay_sales` for visibility only. It does not mark slabs sold or change inventory.
+          </p>
+        </div>
+        <button
+          type="button"
+          onClick={onSync}
+          disabled={sales.syncing}
+          className="rounded-md border border-blue-700/70 bg-blue-900/40 px-3 py-2 text-xs font-semibold text-blue-100 hover:bg-blue-800/60 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {syncLabel}
+        </button>
+      </div>
+
+      {sales.error && (
+        <div className="mt-3 rounded-md border border-red-800/60 bg-red-950/40 px-3 py-2 text-xs text-red-200">
+          {sales.error}
+        </div>
+      )}
+
+      <div className="mt-4 grid gap-3 md:grid-cols-4">
+        <DashboardMetric label="Synced rows" value={sales.loading ? 'Loading…' : (sales.totalRows ?? 0).toLocaleString()} tone="info" />
+        <DashboardMetric label="Last 7d line items" value={sales.loading ? 'Loading…' : sales.last7LineItems.toLocaleString()} tone="info" />
+        <DashboardMetric label="Last 7d gross" value={sales.loading ? 'Loading…' : formatCurrency(sales.last7Revenue)} tone="good" />
+        <DashboardMetric label="Awaiting fulfilment" value={sales.loading ? 'Loading…' : (sales.unfulfilledCount ?? 0).toLocaleString()} tone={(sales.unfulfilledCount ?? 0) ? 'warn' : 'good'} />
+      </div>
+
+      <div className="mt-3 flex flex-wrap gap-3 text-xs text-slate-400">
+        <span>Last sync: <span className="text-slate-200">{lastSync}</span></span>
+        {sales.lastSync && <span>Last result: <span className="text-slate-200">{sales.lastSync.orders_fetched ?? 0} orders / {sales.lastSync.sales_created ?? 0} line items</span></span>}
+        {sales.lastSyncSummary && <span>Just synced: <span className="text-slate-200">{sales.lastSyncSummary.ordersFetched} orders / {sales.lastSyncSummary.lineItemsUpserted} line items</span></span>}
+      </div>
+
+      <div className="mt-4 space-y-2">
+        <div className="text-xs font-semibold uppercase tracking-wider text-slate-500">Recent synced sales</div>
+        {sales.loading ? (
+          <div className="h-16 animate-pulse rounded-md bg-slate-800/70" />
+        ) : sales.recentSales.length ? (
+          sales.recentSales.map((sale) => (
+            <div key={sale.id} className="rounded-md border border-slate-700/60 bg-slate-950/30 px-3 py-2 text-xs">
+              <div className="font-medium text-slate-100">{sale.title || 'Untitled eBay line item'}</div>
+              <div className="mt-0.5 text-slate-400">
+                {sale.sold_date || 'No sold date'} · {sale.buyer_username || 'buyer unknown'} · {formatCurrency(Number(sale.sale_price ?? 0))} · {sale.fulfillment_status || 'status unknown'}
+              </div>
+            </div>
+          ))
+        ) : (
+          <div className="rounded-md border border-slate-700/60 bg-slate-950/30 px-3 py-2 text-xs text-slate-400">
+            No synced eBay sales found yet.
+          </div>
+        )}
+      </div>
+    </section>
   )
 }
 
