@@ -149,8 +149,10 @@ export async function fetchSalesLedger({ filters, limit = 50, offset = 0 }: Sale
 
   const totalsRecord = (totalsData ?? {}) as { gross?: number; cost?: number; profit?: number };
 
+  const rows = (data ?? []) as SalesLedgerDbRow[];
+
   return {
-    rows: (data ?? []).map((row) => mapRow(row as SalesLedgerDbRow)),
+    rows: rows.map(mapRow),
     total: count ?? 0,
     limit: clampedLimit,
     offset: safeOffset,

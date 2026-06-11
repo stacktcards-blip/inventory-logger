@@ -6,7 +6,7 @@ import {
   exportSalesPackingRowsCsv,
   parseEbaySalesCsv,
 } from '../src/lib/ebaySalesParser'
-import { findNextSalesPackingScanKey } from '../src/lib/salesPackingScan'
+import { findNextSalesPackingScanKey, findPreviousSalesPackingScanKey } from '../src/lib/salesPackingScan'
 import { buildDuplicateOrderCounts, buildSalesPackingImportPayload, buildSalesPackingRowsFromSaved } from '../src/lib/salesPackingPersistence'
 import {
   buildCertValidationMap,
@@ -105,6 +105,15 @@ test('finds the next cert scan row after the current row', () => {
   assert.equal(findNextSalesPackingScanKey(keys, 'row-b'), 'row-c')
   assert.equal(findNextSalesPackingScanKey(keys, 'row-c'), null)
   assert.equal(findNextSalesPackingScanKey(keys, 'missing'), 'row-a')
+})
+
+test('finds the previous cert scan row before the current row', () => {
+  const keys = ['row-a', 'row-b', 'row-c']
+
+  assert.equal(findPreviousSalesPackingScanKey(keys, 'row-c'), 'row-b')
+  assert.equal(findPreviousSalesPackingScanKey(keys, 'row-b'), 'row-a')
+  assert.equal(findPreviousSalesPackingScanKey(keys, 'row-a'), null)
+  assert.equal(findPreviousSalesPackingScanKey(keys, 'missing'), 'row-c')
 })
 
 test('exports expanded sales packing rows as CSV', () => {

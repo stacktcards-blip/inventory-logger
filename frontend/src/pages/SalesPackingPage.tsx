@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   buildSalesPackingSummary,
   exportSalesPackingRowsCsv,
@@ -6,7 +6,7 @@ import {
   parseEbaySalesCsv,
   type SalesPackingRow,
 } from '../lib/ebaySalesParser'
-import { findNextSalesPackingScanKey } from '../lib/salesPackingScan'
+import { findNextSalesPackingScanKey, findPreviousSalesPackingScanKey } from '../lib/salesPackingScan'
 import {
   buildCertValidationMap,
   buildPreviousSessionCertScanMap,
@@ -104,7 +104,9 @@ export function SalesPackingPage() {
   const [persistenceMessage, setPersistenceMessage] = useState<string | null>(null)
   const [persistenceError, setPersistenceError] = useState<string | null>(null)
   const [savedSessionsUnavailable, setSavedSessionsUnavailable] = useState(false)
+  const [focusedRowKey, setFocusedRowKey] = useState<string | null>(null)
   const certInputRefs = useRef<Record<string, HTMLInputElement | null>>({})
+  const autoFocusSignatureRef = useRef<string | null>(null)
 
   const parsed = useMemo(() => {
     if (!csvText.trim()) return { result: null, error: null }
@@ -275,17 +277,38 @@ export function SalesPackingPage() {
   const removedRowCount = activeImport
     ? savedRows.filter((row) => row.removed).length
     : result ? removedRowKeys.size : 0
+  const scanProgressPercent = activeSummary?.expandedRowCount
+    ? Math.round((activeSummary.scannedRows / activeSummary.expandedRowCount) * 100)
+    : 0
+  const pendingScanCount = activeSummary
+    ? Math.max(activeSummary.expandedRowCount - activeSummary.scannedRows, 0)
+    : 0
+  const scanProgressBarWidth = Math.min(Math.max(scanProgressPercent, 0), 100)
   const visibleRowKeys = useMemo(() => rowsWithCerts.map((row) => row.rowKey), [rowsWithCerts])
   const duplicateOrderCounts = useMemo(() => buildDuplicateOrderCounts(rowsWithCerts), [rowsWithCerts])
   const duplicateOrderEntries = useMemo(() => [...duplicateOrderCounts.entries()], [duplicateOrderCounts])
 
+  const focusCertInput = useCallback((targetKey: string | null, options: { select?: boolean } = {}) => {
+    if (!targetKey) return
+    requestAnimationFrame(() => {
+      const input = certInputRefs.current[targetKey]
+      if (!input) return
+      input.focus()
+      if (options.select !== false) input.select()
+      setFocusedRowKey(targetKey)
+    })
+  }, [])
+
   const focusNextCertInput = (currentKey: string) => {
     const nextKey = findNextSalesPackingScanKey(visibleRowKeys, currentKey)
     if (!nextKey) return
-    requestAnimationFrame(() => {
-      certInputRefs.current[nextKey]?.focus()
-      certInputRefs.current[nextKey]?.select()
-    })
+    focusCertInput(nextKey)
+  }
+
+  const focusPreviousCertInput = (currentKey: string) => {
+    const previousKey = findPreviousSalesPackingScanKey(visibleRowKeys, currentKey)
+    if (!previousKey) return
+    focusCertInput(previousKey)
   }
 
   const warningCounts = useMemo(() => {
@@ -296,6 +319,24 @@ export function SalesPackingPage() {
     return [...counts.entries()]
   }, [rowsWithCerts])
 
+  useEffect(() => {
+    if (!rowsWithCerts.length) {
+      setFocusedRowKey(null)
+      autoFocusSignatureRef.current = null
+      return
+    }
+    const activeElement = document.activeElement as HTMLElement | null
+    const isCertInputFocused = activeElement
+      ? Object.values(certInputRefs.current).some((input) => input === activeElement)
+      : false
+    if (isCertInputFocused) return
+    const signature = `${activeImport?.id ?? 'new'}:${rowsWithCerts.length}:${rowsWithCerts[0]?.rowKey ?? 'none'}`
+    if (autoFocusSignatureRef.current === signature) return
+    autoFocusSignatureRef.current = signature
+    const nextPendingRow = rowsWithCerts.find((row) => !row.certScanned.trim()) ?? rowsWithCerts[0]
+    focusCertInput(nextPendingRow?.rowKey ?? null)
+  }, [rowsWithCerts, activeImport, focusCertInput])
+
   const clearWorkingCsv = () => {
     setCsvText('')
     setSourceFilename(null)
@@ -305,6 +346,7 @@ export function SalesPackingPage() {
     setSavedRows([])
     setPersistenceMessage(null)
     setPersistenceError(null)
+    setFocusedRowKey(null)
   }
 
   const handleFile = async (file: File | undefined) => {
@@ -315,6 +357,7 @@ export function SalesPackingPage() {
     setRemovedRowKeys(new Set())
     setActiveImport(null)
     setSavedRows([])
+    setFocusedRowKey(null)
     setPersistenceMessage(null)
     setPersistenceError(null)
   }
@@ -413,6 +456,7 @@ export function SalesPackingPage() {
       setSavedRows((data ?? []) as SavedSalesPackingRow[])
       setCsvText('')
       setSourceFilename(null)
+      setFocusedRowKey(null)
       setCertValues({})
       setRemovedRowKeys(new Set())
     } catch (e) {
@@ -586,6 +630,7 @@ export function SalesPackingPage() {
                   setSourceFilename(null)
                   setCertValues({})
                   setRemovedRowKeys(new Set())
+                  setFocusedRowKey(null)
                   setPersistenceMessage(null)
                   setPersistenceError(null)
                 }}
@@ -635,6 +680,22 @@ export function SalesPackingPage() {
             <Metric label="High-value no SKU" value={activeSummary.highValueMissingSkuCount} tone={activeSummary.highValueMissingSkuCount ? 'danger' : 'default'} />
             <Metric label="Combined rows" value={activeSummary.combinedOrderItemCount} tone={activeSummary.combinedOrderItemCount ? 'warn' : 'default'} />
             <Metric label="Multi-qty rows" value={activeSummary.multiQuantityExpandedCount} tone={activeSummary.multiQuantityExpandedCount ? 'warn' : 'default'} />
+          </div>
+
+          <div className="rounded-lg border border-blue-800/40 bg-blue-950/20 p-3 text-xs text-blue-100">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="text-2xs font-semibold uppercase tracking-wider text-blue-200/80">Scan progress</div>
+              <div className="text-blue-100/80">
+                {activeSummary.scannedRows} / {activeSummary.expandedRowCount} scanned · {pendingScanCount} pending · {scanProgressPercent}%
+              </div>
+            </div>
+            <div className="mt-2 h-2 w-full rounded-full bg-slate-800/70">
+              <div
+                className="h-2 rounded-full bg-emerald-500"
+                style={{ width: `${scanProgressBarWidth}%` }}
+                aria-hidden="true"
+              />
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
@@ -701,8 +762,12 @@ export function SalesPackingPage() {
                 {rowsWithCerts.map((row) => {
                   const key = row.rowKey
                   const validation = validationByRowKey.get(key)
+                  const isFocusedRow = focusedRowKey === key
                   return (
-                    <tr key={key} className="transition-colors hover:bg-base-elevated/50">
+                    <tr
+                      key={key}
+                      className={`transition-colors hover:bg-base-elevated/50 ${isFocusedRow ? 'bg-blue-950/30 outline outline-1 outline-blue-500/40' : ''}`}
+                    >
                       <td className="px-3 py-2">
                         <button
                           type="button"
@@ -727,8 +792,19 @@ export function SalesPackingPage() {
                               setCertValues((current) => ({ ...current, [key]: value }))
                             }
                           }}
-                          onBlur={(e) => void persistCertScan(key, e.target.value)}
+                          onFocus={(e) => {
+                            setFocusedRowKey(key)
+                            requestAnimationFrame(() => e.target.select())
+                          }}
+                          onBlur={(e) => {
+                            if (activeImport) void persistCertScan(key, e.target.value)
+                          }}
                           onKeyDown={(e) => {
+                            if (e.key === 'Enter' && e.shiftKey) {
+                              e.preventDefault()
+                              focusPreviousCertInput(key)
+                              return
+                            }
                             if (e.key !== 'Enter') return
                             e.preventDefault()
                             if (activeImport) void persistCertScan(key, e.currentTarget.value)

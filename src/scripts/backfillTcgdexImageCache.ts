@@ -43,6 +43,9 @@ const provider = 'tcgdex' as const;
 const envDbUrl = process.env.SUPABASE_DB_URL;
 const dryRun = process.argv.includes('--dry-run');
 const includeAll = process.argv.includes('--all');
+const useMasterCards = process.argv.includes('--master-cards');
+const onlySetArg = process.argv.find((arg) => arg.startsWith('--set='));
+const onlySet = onlySetArg?.slice('--set='.length).trim();
 
 if (!envDbUrl) {
   throw new Error('SUPABASE_DB_URL is required');
@@ -66,8 +69,76 @@ function psql(args: string[], input?: string) {
   return result.stdout;
 }
 
+function normalizedLangSqlExpression(column: string) {
+  return `case lower(trim(${column}))
+       when 'eng' then 'en'
+       when 'en' then 'en'
+       when 'english' then 'en'
+       when 'jpn' then 'ja'
+       when 'jp' then 'ja'
+       when 'ja' then 'ja'
+       when 'japanese' then 'ja'
+       else lower(trim(${column}))
+     end`;
+}
+
+function imageCacheMissingClause(sourceAlias: string, setColumn = 'set_abbr', numColumn = 'num', langColumn = 'lang') {
+  if (includeAll) return '';
+  const sourceSet = `${sourceAlias}.${setColumn}`;
+  const sourceNum = `${sourceAlias}.${numColumn}`;
+  const sourceLang = `${sourceAlias}.${langColumn}`;
+  return `and not exists (
+      select 1
+      from tcgdex_image_cache cache
+      where cache.provider = 'tcgdex'
+        and lower(trim(cache.set_abbr)) = lower(trim(${sourceSet}))
+        and (
+          lower(trim(cache.card_num)) = lower(trim(${sourceNum}))
+          or (
+            lower(trim(${sourceLang})) in ('eng', 'en', 'english')
+            and upper(trim(${sourceSet})) in ('XY', 'SM', 'SWSH', 'SVP', 'MEP')
+            and lower(trim(cache.card_num)) in (
+              lower(trim(${sourceSet}) || trim(${sourceNum})),
+              lower(trim(${sourceSet}) || lpad(regexp_replace(trim(${sourceNum}), '^0+', ''), 2, '0')),
+              lower(trim(${sourceSet}) || lpad(regexp_replace(trim(${sourceNum}), '^0+', ''), 3, '0'))
+            )
+          )
+        )
+        and ${normalizedLangSqlExpression('cache.lang')} = ${normalizedLangSqlExpression(sourceLang)}
+        and (cache.image_url is not null or cache.image_small_url is not null)
+    )`;
+}
+
+function queryMasterCardKeys(): RawKey[] {
+  const setFilterClause = onlySet ? `and lower(trim(mc.set_abbr)) = lower(${sqlString(onlySet)})` : '';
+  const missingImageClause = imageCacheMissingClause('mc');
+  const sql = `
+copy (
+  select
+    btrim(mc.set_abbr) as set_abbr,
+    btrim(mc.num) as card_num,
+    btrim(mc.lang) as lang,
+    coalesce(max(cs.canonical_set_name), '') as canonical_set_name,
+    count(*)::int as raw_rows
+  from master_cards mc
+  left join card_sets cs
+    on lower(cs.set_abbr) = lower(mc.set_abbr)
+   and ${normalizedLangSqlExpression('cs.lang')} = ${normalizedLangSqlExpression('mc.lang')}
+  where mc.set_abbr is not null and btrim(mc.set_abbr) <> ''
+    and mc.num is not null and btrim(mc.num) <> ''
+    and mc.lang is not null and btrim(mc.lang) <> ''
+    ${setFilterClause}
+    ${missingImageClause}
+  group by 1,2,3
+  order by 1,2,3
+) to stdout with csv header;
+`;
+  return parseRawKeys(psql(['-q', '-c', sql]));
+}
+
 function queryRawKeys(): RawKey[] {
   const missingPreviewClause = includeAll ? '' : 'and r.image_url is null and r.image_small_url is null';
+  const setFilterClause = onlySet ? `and lower(trim(r.set_abbr)) = lower(${sqlString(onlySet)})` : '';
   const sql = `
 copy (
   with unique_set_lang as (
@@ -91,39 +162,21 @@ copy (
     on usl.set_abbr_key = lower(trim(r.set_abbr))
   left join card_sets cs
     on lower(cs.set_abbr) = lower(r.set_abbr)
-   and (
-     case lower(trim(cs.lang))
-       when 'eng' then 'en'
-       when 'en' then 'en'
-       when 'english' then 'en'
-       when 'jpn' then 'ja'
-       when 'jp' then 'ja'
-       when 'ja' then 'ja'
-       when 'japanese' then 'ja'
-       else lower(trim(cs.lang))
-     end
-   ) = (
-     case lower(trim(coalesce(nullif(trim(r.lang), ''), usl.inferred_lang)))
-       when 'eng' then 'en'
-       when 'en' then 'en'
-       when 'english' then 'en'
-       when 'jpn' then 'ja'
-       when 'jp' then 'ja'
-       when 'ja' then 'ja'
-       when 'japanese' then 'ja'
-       else lower(trim(coalesce(nullif(trim(r.lang), ''), usl.inferred_lang)))
-     end
-   )
+   and ${normalizedLangSqlExpression('cs.lang')} = ${normalizedLangSqlExpression("coalesce(nullif(trim(r.lang), ''), usl.inferred_lang)")}
   where r.set_abbr is not null and btrim(r.set_abbr) <> ''
     and r.num is not null and btrim(r.num) <> ''
     and coalesce(nullif(trim(r.lang), ''), usl.inferred_lang) is not null
     and btrim(coalesce(nullif(trim(r.lang), ''), usl.inferred_lang)) <> ''
     ${missingPreviewClause}
+    ${setFilterClause}
   group by 1,2,3
   order by count(*) desc, 1,2,3
 ) to stdout with csv header;
 `;
-  const out = psql(['-q', '-c', sql]);
+  return parseRawKeys(psql(['-q', '-c', sql]));
+}
+
+function parseRawKeys(out: string): RawKey[] {
   const lines = out.trim().split('\n');
   if (lines.length <= 1) return [];
   return lines.slice(1).map((line) => {
@@ -176,7 +229,20 @@ function normalizeText(value: string) {
     .replace(/\s+/g, ' ');
 }
 
-function numberVariants(cardNum: string) {
+const englishPromoSetIds: Record<string, string> = {
+  XY: 'xyp',
+  SM: 'smp',
+  SWSH: 'swshp',
+  SVP: 'svp',
+  MEP: 'mep',
+};
+
+function englishPromoSetId(setAbbr: string, lang: string) {
+  if (normalizeLang(lang) !== 'en') return null;
+  return englishPromoSetIds[setAbbr.trim().toUpperCase()] ?? null;
+}
+
+function numberVariants(cardNum: string, setAbbr?: string, lang?: string) {
   const raw = cardNum.trim();
   const variants = new Set<string>([raw, raw.toUpperCase(), raw.toLowerCase()]);
   const noSlash = raw.includes('/') ? raw.split('/')[0] : raw;
@@ -189,6 +255,25 @@ function numberVariants(cardNum: string) {
     variants.add(numeric.padStart(2, '0'));
     variants.add(numeric.padStart(3, '0'));
   }
+
+  // English Black Star promo eras often print the set prefix as part of the card
+  // number (e.g. SWSH144 / SWSH144, XY01, SM210). Stackt stores these split
+  // as set_abbr + num, so try both the normalized DB number and the printed
+  // promo identifier when resolving image sources.
+  if (setAbbr && lang && englishPromoSetId(setAbbr, lang)) {
+    const prefix = setAbbr.trim().toUpperCase();
+    const baseNumbers = new Set<string>([noSlash]);
+    if (numeric) {
+      baseNumbers.add(numeric);
+      baseNumbers.add(numeric.padStart(2, '0'));
+      baseNumbers.add(numeric.padStart(3, '0'));
+    }
+    for (const number of baseNumbers) {
+      variants.add(`${prefix}${number}`);
+      variants.add(`${prefix}${number}`.toLowerCase());
+    }
+  }
+
   return Array.from(variants).filter(Boolean);
 }
 
@@ -219,11 +304,28 @@ async function getSetLists(apiLang: string) {
   return list;
 }
 
+const tcgdexSetAliases: Record<string, string> = {
+  XYB: 'xy1',
+  CELC: 'cel25',
+};
+
 async function resolveSet(apiLang: string, rawSetAbbr: string, canonicalSetName: string) {
   const list = await getSetLists(apiLang);
   const byId = new Map(list.map((set) => [set.id.toLowerCase(), set]));
   const exact = byId.get(rawSetAbbr.toLowerCase());
   if (exact) return { set: exact, match: 'set_id_exact' };
+
+  const aliasSetId = tcgdexSetAliases[rawSetAbbr.trim().toUpperCase()];
+  if (aliasSetId) {
+    const aliasSet = byId.get(aliasSetId.toLowerCase());
+    if (aliasSet) return { set: aliasSet, match: 'tcgdex_set_alias' };
+  }
+
+  const promoSetId = englishPromoSetId(rawSetAbbr, apiLang);
+  if (promoSetId) {
+    const promoSet = byId.get(promoSetId.toLowerCase());
+    if (promoSet) return { set: promoSet, match: 'english_promo_set_alias' };
+  }
 
   const wantedName = normalizeText(canonicalSetName || rawSetAbbr);
   if (wantedName) {
@@ -257,7 +359,7 @@ async function resolveCard(raw: RawKey): Promise<CacheRow> {
 
   const detail = await getSetDetail(apiLang, setResolution.set.id);
   const cards = detail?.cards ?? [];
-  const variants = numberVariants(raw.cardNum).map((value) => value.toLowerCase());
+  const variants = numberVariants(raw.cardNum, raw.setAbbr, raw.lang).map((value) => value.toLowerCase());
   const card = cards.find((candidate) => variants.includes(candidate.localId.toLowerCase()));
   if (!card?.image) {
     return notFound(raw, apiLang, {
@@ -267,7 +369,7 @@ async function resolveCard(raw: RawKey): Promise<CacheRow> {
       setName: setResolution.set.name,
       setMatch: setResolution.match,
       cardNumInput: raw.cardNum,
-      numVariants: numberVariants(raw.cardNum),
+      numVariants: numberVariants(raw.cardNum, raw.setAbbr, raw.lang),
       langInput: raw.lang,
       apiLang,
     });
@@ -421,8 +523,9 @@ commit;
 }
 
 async function main() {
-  const rawKeys = queryRawKeys();
-  console.log(`Found ${rawKeys.length} distinct raw-card keys to backfill${includeAll ? ' (--all)' : ' (missing previews only)'}.`);
+  const rawKeys = useMasterCards ? queryMasterCardKeys() : queryRawKeys();
+  const sourceLabel = useMasterCards ? 'master_cards' : 'raw-card keys';
+  console.log(`Found ${rawKeys.length} distinct ${sourceLabel} to backfill${includeAll ? ' (--all)' : ' (missing images only)'}${onlySet ? ` for set ${onlySet}` : ''}.`);
   const rows: CacheRow[] = [];
   let processed = 0;
   for (const raw of rawKeys) {
