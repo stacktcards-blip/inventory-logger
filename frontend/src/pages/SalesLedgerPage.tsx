@@ -1,6 +1,7 @@
 import { Dispatch, SetStateAction, useCallback, useEffect, useMemo, useState } from 'react'
 import { SalesLedgerFilters } from '../components/SalesLedgerFilters'
 import { SalesLedgerTable } from '../components/SalesLedgerTable'
+import { summarizeLedgerMatching } from '../lib/salesLedgerMatching'
 import { fetchSalesLedger } from '../lib/ebaySalesApi'
 import type { SalesLedgerResponse } from '../types/salesLedger'
 
@@ -65,6 +66,7 @@ export function SalesLedgerPage() {
 
   const canPrev = page > 0
   const canNext = data ? (page + 1) * PAGE_SIZE < data.total : false
+  const matchingSummary = useMemo(() => summarizeLedgerMatching(data?.rows ?? []), [data?.rows])
 
   const handleFiltersChange = useCallback<Dispatch<SetStateAction<LedgerFilters>>>((update) => {
     setFilters((current) => (typeof update === 'function' ? update(current) : update))
@@ -86,6 +88,13 @@ export function SalesLedgerPage() {
         <LedgerStat label="Gross (AUD)" value={data?.totals.gross ?? 0} tone="good" loading={loading && !data} />
         <LedgerStat label="Purchase cost" value={data?.totals.cost ?? 0} tone="warn" loading={loading && !data} />
         <LedgerStat label="Gross profit" value={data?.totals.profit ?? 0} tone="info" loading={loading && !data} />
+      </div>
+
+      <div className="grid gap-3 sm:grid-cols-4">
+        <LedgerCount label="Matched" value={matchingSummary.matched} tone="good" />
+        <LedgerCount label="Needs review" value={matchingSummary.review} tone="warn" />
+        <LedgerCount label="Unmatched" value={matchingSummary.unmatched} tone="neutral" />
+        <LedgerCount label="Profit visible" value={matchingSummary.withGrossProfit} tone="info" />
       </div>
 
       {error && (
@@ -145,6 +154,30 @@ function LedgerStat({ label, value, tone, loading }: LedgerStatProps) {
     <div className={`rounded-2xl border px-4 py-4 ${toneClasses}`}>
       <div className="text-xs uppercase tracking-wide text-white/60">{label}</div>
       <div className="text-2xl font-semibold">{loading ? '—' : formatAud(value)}</div>
+    </div>
+  )
+}
+
+type LedgerCountProps = {
+  label: string
+  value: number
+  tone: 'good' | 'warn' | 'info' | 'neutral'
+}
+
+function LedgerCount({ label, value, tone }: LedgerCountProps) {
+  const toneClasses =
+    tone === 'good'
+      ? 'border-emerald-900/50 bg-emerald-950/20 text-emerald-100'
+      : tone === 'warn'
+        ? 'border-amber-900/50 bg-amber-950/20 text-amber-100'
+        : tone === 'info'
+          ? 'border-blue-900/50 bg-blue-950/20 text-blue-100'
+          : 'border-slate-800/70 bg-slate-950/30 text-slate-100'
+
+  return (
+    <div className={`rounded-xl border px-4 py-3 ${toneClasses}`}>
+      <div className="text-xs uppercase tracking-wide text-white/50">{label}</div>
+      <div className="text-xl font-semibold">{value}</div>
     </div>
   )
 }

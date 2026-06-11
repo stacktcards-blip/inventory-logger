@@ -33,6 +33,16 @@ export type SalesLedgerRow = {
   grossProfitAud: number | null;
   daysHeld: number | null;
   imageUrl: string | null;
+  packingRowId: string | null;
+  packingImportId: string | null;
+  packingCert: string | null;
+  packingScanStatus: string | null;
+  packingMatchMethod: string | null;
+  packingReviewReason: string | null;
+  packingImportedAt: string | null;
+  inventoryMatchStatus: string;
+  inventoryMatchLabel: string;
+  reviewReason: string | null;
 };
 
 export type SalesLedgerResponse = {

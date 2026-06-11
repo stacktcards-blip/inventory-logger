@@ -33,6 +33,16 @@ export type SalesLedgerRow = {
   grossProfitAud: number | null;
   daysHeld: number | null;
   imageUrl: string | null;
+  packingRowId: string | null;
+  packingImportId: string | null;
+  packingCert: string | null;
+  packingScanStatus: string | null;
+  packingMatchMethod: string | null;
+  packingReviewReason: string | null;
+  packingImportedAt: string | null;
+  inventoryMatchStatus: string;
+  inventoryMatchLabel: string;
+  reviewReason: string | null;
 };
 
 export type SalesLedgerQuery = {
@@ -66,6 +76,16 @@ type SalesLedgerDbRow = {
   gross_profit_aud: number | null;
   days_held: number | null;
   image_url: string | null;
+  packing_row_id?: string | null;
+  packing_import_id?: string | null;
+  packing_cert?: string | null;
+  packing_scan_status?: string | null;
+  packing_match_method?: string | null;
+  packing_review_reason?: string | null;
+  packing_imported_at?: string | null;
+  inventory_match_status?: string | null;
+  inventory_match_label?: string | null;
+  review_reason?: string | null;
 };
 
 const applyFilters = <T extends { gte: Function; lte: Function; eq: Function; or: Function }>(
@@ -113,6 +133,16 @@ const mapRow = (row: SalesLedgerDbRow): SalesLedgerRow => ({
   grossProfitAud: row.gross_profit_aud != null ? Number(row.gross_profit_aud) : null,
   daysHeld: row.days_held != null ? Number(row.days_held) : null,
   imageUrl: row.image_url,
+  packingRowId: row.packing_row_id ?? null,
+  packingImportId: row.packing_import_id ?? null,
+  packingCert: row.packing_cert ?? null,
+  packingScanStatus: row.packing_scan_status ?? null,
+  packingMatchMethod: row.packing_match_method ?? null,
+  packingReviewReason: row.packing_review_reason ?? null,
+  packingImportedAt: row.packing_imported_at ?? null,
+  inventoryMatchStatus: row.inventory_match_status ?? row.match_status ?? 'PENDING',
+  inventoryMatchLabel: row.inventory_match_label ?? row.match_status ?? 'PENDING',
+  reviewReason: row.review_reason ?? null,
 });
 
 export async function fetchSalesLedger({ filters, limit = 50, offset = 0 }: SalesLedgerQuery) {

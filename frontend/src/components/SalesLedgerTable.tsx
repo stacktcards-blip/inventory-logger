@@ -1,3 +1,5 @@
+import { getLedgerMatchDisplay } from '../lib/salesLedgerMatching'
+import type { LedgerMatchTone } from '../lib/salesLedgerMatching'
 import type { SalesLedgerRow } from '../types/salesLedger'
 
 const currencyFormatters = new Map<string, Intl.NumberFormat>()
@@ -15,9 +17,9 @@ const formatCurrency = (value: number | null, currency = 'AUD') => {
   return currencyFormatters.get(key)!.format(value)
 }
 
-const toneClass = (status: string) => {
-  if (status === 'MATCHED') return 'bg-emerald-900/40 text-emerald-200'
-  if (status === 'MANUAL_REVIEW') return 'bg-amber-900/40 text-amber-200'
+const toneClass = (tone: LedgerMatchTone) => {
+  if (tone === 'matched') return 'bg-emerald-900/40 text-emerald-200'
+  if (tone === 'review') return 'bg-amber-900/40 text-amber-200'
   return 'bg-slate-800/70 text-slate-300'
 }
 
@@ -42,7 +44,9 @@ export function SalesLedgerTable({ rows }: Props) {
           </tr>
         </thead>
         <tbody className="divide-y divide-slate-800/80">
-          {rows.map((row) => (
+          {rows.map((row) => {
+            const match = getLedgerMatchDisplay(row)
+            return (
             <tr key={row.saleId} className="bg-slate-950/30 hover:bg-slate-900/40">
               <td className="px-4 py-3 text-sm text-slate-300">
                 <div>{row.soldDate ?? 'Unposted'}</div>
@@ -57,6 +61,9 @@ export function SalesLedgerTable({ rows }: Props) {
                 <div className="text-xs text-slate-400">
                   {[row.slabSetAbbr, row.slabNum, row.slabLang].filter(Boolean).join(' · ') || row.matchMethod || '—'}
                 </div>
+                {row.packingCert && row.packingCert !== row.slabCert && (
+                  <div className="mt-1 text-xs text-blue-300">Packing scan: {row.packingCert}</div>
+                )}
               </td>
               <td className="px-4 py-3 text-sm text-slate-400">{row.buyerUsername ?? '—'}</td>
               <td className="px-4 py-3 text-right text-sm text-slate-100">
@@ -70,13 +77,17 @@ export function SalesLedgerTable({ rows }: Props) {
                 {formatCurrency(row.grossProfitAud, 'AUD')}
               </td>
               <td className="px-4 py-3 text-center text-xs">
-                <span className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${toneClass(row.matchStatus)}`}>
-                  {row.matchStatus}
-                </span>
+                <div className="flex flex-col items-center gap-1">
+                  <span className={`inline-flex rounded-full px-2 py-0.5 font-semibold ${toneClass(match.tone)}`}>
+                    {match.label}
+                  </span>
+                  <span className="max-w-48 text-slate-500">{match.detail}</span>
+                </div>
               </td>
               <td className="px-4 py-3 text-center text-xs text-slate-400">{row.fulfillmentStatus ?? '—'}</td>
             </tr>
-          ))}
+            )
+          })}
           {rows.length === 0 && (
             <tr>
               <td colSpan={8} className="px-4 py-10 text-center text-sm text-slate-500">
