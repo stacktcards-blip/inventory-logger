@@ -133,16 +133,16 @@ export async function fetchSalesLedger({ filters, limit = 50, offset = 0 }: Sale
     throw new Error(`Failed to load sales ledger rows: ${error.message}`);
   }
 
-  const totalsQuery = applyFilters(
-    supabase
-      .from('sales_ledger')
-      .select(
-        `gross:sale_price.sum(),cost:raw_cost_aud.sum(),profit:gross_profit_aud.sum()`
-      ),
-    filters
-  );
+  const { data: totalsData, error: totalsError } = await supabase
+    .rpc('sales_ledger_totals', {
+      p_start_date: filters?.startDate ?? null,
+      p_end_date: filters?.endDate ?? null,
+      p_match_status: filters?.matchStatus ?? null,
+      p_fulfillment_status: filters?.fulfillmentStatus ?? null,
+      p_search: filters?.search ?? null,
+    })
+    .single();
 
-  const { data: totalsData, error: totalsError } = await totalsQuery.single();
   if (totalsError && totalsError.code !== 'PGRST116') {
     throw new Error(`Failed to summarize sales ledger: ${totalsError.message}`);
   }
