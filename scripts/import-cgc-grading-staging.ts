@@ -83,7 +83,15 @@ function normalizeKey(value: string): string {
 function pick(row: Record<string, string>, candidates: string[]): string | undefined {
   const byKey = new Map(Object.entries(row).map(([key, value]) => [normalizeKey(key), value]))
   for (const candidate of candidates) {
-    const value = byKey.get(normalizeKey(candidate))
+    const key = normalizeKey(candidate)
+    if (!key && !candidate) {
+      if (row.hasOwnProperty('')) {
+        const value = row['']
+        if (value != null && String(value).trim()) return value
+      }
+      continue
+    }
+    const value = byKey.get(key)
     if (value != null && value.trim()) return value
   }
   return undefined
@@ -116,7 +124,7 @@ const parsed = parseCsv(readFileSync(csvPath, 'utf8'))
 const rows = parsed.map((row) => {
   const grade = nullableText(pick(row, ['grade', 'final grade', 'cgc grade', 'assigned grade']))
   const descriptionParts = [
-    pick(row, ['description', 'item description', 'label description']),
+    pick(row, ['description', 'item description', 'label description', 'card description']),
     pick(row, ['year']),
     pick(row, ['card name', 'name', 'subject']),
     pick(row, ['set name', 'set']),
@@ -124,8 +132,8 @@ const rows = parsed.map((row) => {
   ].map((value) => nullableText(value)).filter(Boolean)
 
   return {
-    cgc_order_number: nullableText(pick(row, ['cgc order number', 'order number', 'submission number', 'submission #', 'invoice number'])),
-    cert_number: nullableText(pick(row, ['cert number', 'certification number', 'certification #', 'cert #', 'cgc cert number', 'cgc certification number'])),
+    cgc_order_number: nullableText(pick(row, ['cgc order number', 'order number', 'submission number', 'submission #', 'invoice number', 'invoice #'])),
+    cert_number: nullableText(pick(row, ['cert number', 'certification number', 'certification #', 'cert #', 'cgc cert number', 'cgc certification number', '', 'line item cert', 'line item certificate', 'line item cert number', 'line item certificate number'])),
     item_type: nullableText(pick(row, ['item type', 'type', 'category'])),
     description: nullableText(pick(row, ['description', 'item description', 'label description'])) ?? (descriptionParts.length ? descriptionParts.join(' ') : null),
     grade,
@@ -138,7 +146,7 @@ const rows = parsed.map((row) => {
     set_code: nullableText(pick(row, ['set code', 'set abbreviation', 'set abbr'])),
     set_name: nullableText(pick(row, ['set name', 'set'])),
     card_number: nullableText(pick(row, ['card number', 'number', 'card no', 'card #'])),
-    card_name: nullableText(pick(row, ['card name', 'name', 'subject'])),
+    card_name: nullableText(pick(row, ['card name', 'name', 'subject', 'card description'])),
     variety: nullableText(pick(row, ['variety', 'variant', 'parallel', 'pedigree'])),
     raw_row_json: row,
     import_batch: importBatch,
