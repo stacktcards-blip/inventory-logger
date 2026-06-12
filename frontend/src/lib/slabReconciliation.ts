@@ -27,6 +27,20 @@ export type ReconciliationSourceRow = {
   listed_date?: string | null
   source_psa_row_id?: string | null
   source_stocktake_scan_id?: string | null
+  psa_order_number?: string | null
+  psa_description?: string | null
+  psa_grade?: string | null
+  psa_numeric_grade?: number | string | null
+  psa_set_name?: string | null
+  psa_set_code?: string | null
+  psa_card_number?: string | null
+  psa_card_name?: string | null
+  psa_parsed_set_abbr?: string | null
+  psa_parsed_num?: string | null
+  psa_parsed_lang?: string | null
+  psa_match_status?: string | null
+  psa_review_reason?: string | null
+  psa_label_extra_details?: string | null
 }
 
 export type ReconciliationRow = ReconciliationSourceRow & {
@@ -156,8 +170,25 @@ export function filterReconciliationRows(
   return rows.filter((row) => {
     if (queue !== 'all' && row.queue !== queue) return false
     if (!search) return true
-    return [row.cert, row.sku, row.card_name, row.grade, row.set_abbr, row.num, row.lang, ...row.reasons]
-      .some((entry) => String(entry ?? '').toLowerCase().includes(search))
+    return [
+      row.cert,
+      row.sku,
+      row.card_name,
+      row.grade,
+      row.set_abbr,
+      row.num,
+      row.lang,
+      row.psa_order_number,
+      row.psa_description,
+      row.psa_card_name,
+      row.psa_set_name,
+      row.psa_parsed_set_abbr,
+      row.psa_parsed_num,
+      row.psa_parsed_lang,
+      row.psa_match_status,
+      row.psa_review_reason,
+      ...row.reasons,
+    ].some((entry) => String(entry ?? '').toLowerCase().includes(search))
   })
 }
 
@@ -168,7 +199,29 @@ function csvCell(valueToEscape: unknown): string {
 }
 
 export function exportReconciliationRowsCsv(rows: ReconciliationRow[]): string {
-  const headers = ['queue', 'severity', 'cert', 'sku', 'card name', 'grade', 'set', 'number', 'lang', 'listing state', 'sales status', 'metadata status', 'stock source', 'reasons']
+  const headers = [
+    'queue',
+    'severity',
+    'cert',
+    'sku',
+    'card name',
+    'grade',
+    'current set',
+    'current number',
+    'current lang',
+    'psa order',
+    'psa raw description',
+    'psa parsed set',
+    'psa parsed number',
+    'psa parsed lang',
+    'psa match status',
+    'psa review reason',
+    'listing state',
+    'sales status',
+    'metadata status',
+    'stock source',
+    'reasons',
+  ]
   const lines = rows.map((row) => [
     row.queue,
     row.severity,
@@ -179,6 +232,13 @@ export function exportReconciliationRowsCsv(rows: ReconciliationRow[]): string {
     row.set_abbr,
     row.num,
     row.lang,
+    row.psa_order_number,
+    row.psa_description,
+    row.psa_parsed_set_abbr,
+    row.psa_parsed_num,
+    row.psa_parsed_lang,
+    row.psa_match_status,
+    row.psa_review_reason,
     row.listing_state,
     row.sales_status,
     row.metadata_status,

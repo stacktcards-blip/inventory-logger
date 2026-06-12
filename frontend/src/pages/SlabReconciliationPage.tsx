@@ -43,6 +43,85 @@ function downloadTextFile(filename: string, content: string) {
   URL.revokeObjectURL(url)
 }
 
+type PsaStagingRow = {
+  id: string
+  cert_number: string | null
+  psa_order_number: string | null
+  description: string | null
+  grade: string | null
+  numeric_grade: number | null
+  set_name: string | null
+  set_code: string | null
+  card_number: string | null
+  card_name: string | null
+  parsed_set_abbr: string | null
+  parsed_num: string | null
+  parsed_lang: string | null
+  master_card_match_status: string | null
+  parse_review_reason: string | null
+  psa_label_extra_details: string | null
+}
+
+function chunk<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = []
+  for (let index = 0; index < items.length; index += size) chunks.push(items.slice(index, index + size))
+  return chunks
+}
+
+function normalizeCert(cert: string | null | undefined): string {
+  return String(cert ?? '').replace(/[^0-9A-Za-z]/g, '')
+}
+
+function psaProposalScore(row: PsaStagingRow): number {
+  let score = 0
+  if (row.master_card_match_status === 'MATCHED_CONFIRMED') score += 100
+  if (row.parsed_set_abbr && row.parsed_num && row.parsed_lang) score += 40
+  if (row.parsed_set_abbr) score += 5
+  if (row.parsed_num) score += 5
+  if (row.parsed_lang) score += 5
+  return score
+}
+
+function choosePsaRow(slab: ReconciliationSourceRow, candidates: PsaStagingRow[]): PsaStagingRow | null {
+  if (!candidates.length) return null
+  const linked = slab.source_psa_row_id ? candidates.find((candidate) => candidate.id === slab.source_psa_row_id) : null
+  if (linked) return linked
+  return [...candidates].sort((a, b) => psaProposalScore(b) - psaProposalScore(a))[0] ?? null
+}
+
+function attachPsaMetadata(rows: ReconciliationSourceRow[], psaRows: PsaStagingRow[]): ReconciliationSourceRow[] {
+  const psaByCert = new Map<string, PsaStagingRow[]>()
+  psaRows.forEach((row) => {
+    const cert = normalizeCert(row.cert_number)
+    if (!cert) return
+    const bucket = psaByCert.get(cert) ?? []
+    bucket.push(row)
+    psaByCert.set(cert, bucket)
+  })
+
+  return rows.map((row) => {
+    const psa = choosePsaRow(row, psaByCert.get(normalizeCert(row.cert)) ?? [])
+    if (!psa) return row
+    return {
+      ...row,
+      psa_order_number: psa.psa_order_number,
+      psa_description: psa.description,
+      psa_grade: psa.grade,
+      psa_numeric_grade: psa.numeric_grade,
+      psa_set_name: psa.set_name,
+      psa_set_code: psa.set_code,
+      psa_card_number: psa.card_number,
+      psa_card_name: psa.card_name,
+      psa_parsed_set_abbr: psa.parsed_set_abbr,
+      psa_parsed_num: psa.parsed_num,
+      psa_parsed_lang: psa.parsed_lang,
+      psa_match_status: psa.master_card_match_status,
+      psa_review_reason: psa.parse_review_reason,
+      psa_label_extra_details: psa.psa_label_extra_details,
+    }
+  })
+}
+
 export function SlabReconciliationPage() {
   const [rows, setRows] = useState<ReconciliationSourceRow[]>([])
   const [activeQueue, setActiveQueue] = useState<ReconciliationQueue | 'all'>('all')
@@ -59,7 +138,18 @@ export function SlabReconciliationPage() {
         .select('*')
         .limit(2000)
       if (queryError) throw queryError
-      setRows((data ?? []) as ReconciliationSourceRow[])
+      const sourceRows = (data ?? []) as ReconciliationSourceRow[]
+      const certs = [...new Set(sourceRows.map((row) => normalizeCert(row.cert)).filter(Boolean))]
+      const psaRows: PsaStagingRow[] = []
+      for (const certChunk of chunk(certs, 100)) {
+        const { data: psaData, error: psaError } = await supabase
+          .from('psa_grading_order_rows')
+          .select('id,cert_number,psa_order_number,description,grade,numeric_grade,set_name,set_code,card_number,card_name,parsed_set_abbr,parsed_num,parsed_lang,master_card_match_status,parse_review_reason,psa_label_extra_details')
+          .in('cert_number', certChunk)
+        if (psaError) throw psaError
+        psaRows.push(...((psaData ?? []) as PsaStagingRow[]))
+      }
+      setRows(attachPsaMetadata(sourceRows, psaRows))
     } catch (e) {
       setRows([])
       setError(e instanceof Error ? e.message : 'Could not load slab reconciliation data')
@@ -90,7 +180,7 @@ export function SlabReconciliationPage() {
             Slab Reconciliation Cockpit
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-400">
-            Read-only exception queues for cert-level slab cleanup. Uses available slabs_dashboard fields and safely degrades if newer lifecycle fields are not populated yet.
+            Cert-level slab cleanup with PSA staging metadata joined by cert. Compare current slab fields against the raw PSA label and parser proposal, then approve/edit exceptions instead of reconstructing cards from scratch.
           </p>
         </div>
         <div className="flex gap-2">
@@ -155,7 +245,16 @@ export function SlabReconciliationPage() {
         <table className="min-w-full divide-y divide-base-border/60">
           <thead className="bg-gradient-to-b from-slate-800/80 to-slate-900/60">
             <tr>
-              {['Queue', 'Cert', 'Card', 'Grade', 'Set', 'Listing', 'Sales', 'Metadata', 'Stock source', 'Reasons'].map((header) => (
+          {[
+            'Queue',
+            'Cert / SKU',
+            'Current slab',
+            'PSA raw label',
+            'PSA parser proposal',
+            'Listing',
+            'Metadata',
+            'Reasons',
+          ].map((header) => (
                 <th key={header} className="px-3 py-2 text-left text-2xs font-semibold uppercase tracking-wider text-slate-500">
                   {header}
                 </th>
@@ -193,14 +292,33 @@ function ReconciliationTableRow({ row }: { row: ReconciliationRow }) {
       <td className="whitespace-nowrap px-3 py-2 text-xs">
         <span className={`rounded-full border px-2 py-0.5 ${tone}`}>{QUEUE_LABELS[row.queue]}</span>
       </td>
-      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-100">{row.cert || '—'}</td>
-      <td className="min-w-[16rem] px-3 py-2 text-xs text-slate-200">{row.card_name || row.sku || '—'}</td>
-      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">{row.grading_company || 'PSA'} {row.grade || '—'}</td>
-      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">{[row.set_abbr, row.num, row.lang].filter(Boolean).join(' / ') || '—'}</td>
-      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">{row.listing_state || '—'}</td>
-      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">{row.sales_status || '—'}</td>
-      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">{row.metadata_status || '—'}</td>
-      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">{row.stock_source || '—'}</td>
+      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-100">
+        <div className="font-mono">{row.cert || '—'}</div>
+        <div className="mt-0.5 text-2xs text-slate-500">{row.sku || 'no SKU'}</div>
+      </td>
+      <td className="min-w-[16rem] px-3 py-2 text-xs text-slate-300">
+        <div className="font-medium text-slate-100">{row.card_name || 'No master-card name yet'}</div>
+        <div className="mt-1 text-slate-400">{row.grading_company || 'PSA'} {row.grade || '—'} · {[row.set_abbr, row.num, row.lang].filter(Boolean).join(' / ') || 'missing strict fields'}</div>
+      </td>
+      <td className="min-w-[24rem] px-3 py-2 text-xs text-slate-300">
+        <div className="text-slate-100">{row.psa_description || 'No PSA staging row found'}</div>
+        {row.psa_order_number && <div className="mt-1 text-2xs text-slate-500">PSA order {row.psa_order_number} · {row.psa_grade || row.psa_numeric_grade || 'grade —'}</div>}
+      </td>
+      <td className="min-w-[15rem] px-3 py-2 text-xs text-slate-300">
+        <div className="font-mono text-slate-100">
+          {[row.psa_parsed_set_abbr, row.psa_parsed_num, row.psa_parsed_lang].filter(Boolean).join(' / ') || 'No parser proposal'}
+        </div>
+        <div className="mt-1 text-2xs text-slate-500">{row.psa_match_status || 'unparsed'}</div>
+        {row.psa_review_reason && <div className="mt-1 max-w-xs text-2xs text-amber-200">{row.psa_review_reason}</div>}
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">
+        <div>{row.listing_state || '—'}</div>
+        <div className="mt-0.5 text-2xs text-slate-500">{row.sales_status || '—'}</div>
+      </td>
+      <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">
+        <div>{row.metadata_status || '—'}</div>
+        <div className="mt-0.5 text-2xs text-slate-500">{row.stock_source || '—'}</div>
+      </td>
       <td className="min-w-[14rem] px-3 py-2 text-xs text-amber-100">{row.reasons.join('; ') || '—'}</td>
     </tr>
   )
