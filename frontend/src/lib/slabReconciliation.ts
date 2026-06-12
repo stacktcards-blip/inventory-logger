@@ -26,6 +26,7 @@ export type ReconciliationSourceRow = {
   sold_date?: string | null
   listed_date?: string | null
   source_psa_row_id?: string | null
+  source_cgc_row_id?: string | null
   source_stocktake_scan_id?: string | null
   psa_order_number?: string | null
   psa_description?: string | null
@@ -41,6 +42,21 @@ export type ReconciliationSourceRow = {
   psa_match_status?: string | null
   psa_review_reason?: string | null
   psa_label_extra_details?: string | null
+  cgc_order_number?: string | null
+  cgc_description?: string | null
+  cgc_grade?: string | null
+  cgc_numeric_grade?: number | string | null
+  cgc_normalized_grade?: string | null
+  cgc_set_name?: string | null
+  cgc_set_code?: string | null
+  cgc_card_number?: string | null
+  cgc_card_name?: string | null
+  cgc_parsed_set_abbr?: string | null
+  cgc_parsed_num?: string | null
+  cgc_parsed_lang?: string | null
+  cgc_match_status?: string | null
+  cgc_review_reason?: string | null
+  cgc_label_extra_details?: string | null
 }
 
 export type ReconciliationRow = ReconciliationSourceRow & {
@@ -121,8 +137,9 @@ export function classifySlabReconciliationRow(
 
   const strictFields = hasStrictCardFields(row)
   const metadataStatus = normalized(row.metadata_status)
-  if (metadataStatus === 'PSA_METADATA_ONLY') {
-    reasons.push('PSA metadata only')
+  if (metadataStatus === 'PSA_METADATA_ONLY' || metadataStatus === 'CGC_METADATA_ONLY') {
+    const provider = normalized(row.grading_company) || 'PSA'
+    reasons.push(`${provider} metadata only`)
     return { ...row, queue: 'cert_only', severity: 'warn', reasons }
   }
 
@@ -187,6 +204,15 @@ export function filterReconciliationRows(
       row.psa_parsed_lang,
       row.psa_match_status,
       row.psa_review_reason,
+      row.cgc_order_number,
+      row.cgc_description,
+      row.cgc_card_name,
+      row.cgc_set_name,
+      row.cgc_parsed_set_abbr,
+      row.cgc_parsed_num,
+      row.cgc_parsed_lang,
+      row.cgc_match_status,
+      row.cgc_review_reason,
       ...row.reasons,
     ].some((entry) => String(entry ?? '').toLowerCase().includes(search))
   })
@@ -216,6 +242,13 @@ export function exportReconciliationRowsCsv(rows: ReconciliationRow[]): string {
     'psa parsed lang',
     'psa match status',
     'psa review reason',
+    'cgc order',
+    'cgc raw description',
+    'cgc parsed set',
+    'cgc parsed number',
+    'cgc parsed lang',
+    'cgc match status',
+    'cgc review reason',
     'listing state',
     'sales status',
     'metadata status',
@@ -239,6 +272,13 @@ export function exportReconciliationRowsCsv(rows: ReconciliationRow[]): string {
     row.psa_parsed_lang,
     row.psa_match_status,
     row.psa_review_reason,
+    row.cgc_order_number,
+    row.cgc_description,
+    row.cgc_parsed_set_abbr,
+    row.cgc_parsed_num,
+    row.cgc_parsed_lang,
+    row.cgc_match_status,
+    row.cgc_review_reason,
     row.listing_state,
     row.sales_status,
     row.metadata_status,

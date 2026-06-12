@@ -13,7 +13,7 @@ const QUEUE_LABELS: Record<ReconciliationQueue | 'all', string> = {
   all: 'All',
   ready_to_list: 'Ready / safe-ish to list',
   needs_enrichment: 'Needs enrichment',
-  cert_only: 'Cert-only / PSA metadata',
+  cert_only: 'Cert-only / grader metadata',
   duplicate_cert: 'Duplicate cert conflicts',
   sold_but_seen: 'Sold but physically seen',
   awaiting_auction: 'Awaiting auction',
@@ -60,6 +60,26 @@ type PsaStagingRow = {
   master_card_match_status: string | null
   parse_review_reason: string | null
   psa_label_extra_details: string | null
+}
+
+type CgcStagingRow = {
+  id: string
+  cert_number: string | null
+  cgc_order_number: string | null
+  description: string | null
+  grade: string | null
+  numeric_grade: number | null
+  normalized_grade: string | null
+  set_name: string | null
+  set_code: string | null
+  card_number: string | null
+  card_name: string | null
+  parsed_set_abbr: string | null
+  parsed_num: string | null
+  parsed_lang: string | null
+  master_card_match_status: string | null
+  parse_review_reason: string | null
+  cgc_label_extra_details: string | null
 }
 
 function chunk<T>(items: T[], size: number): T[][] {
@@ -122,6 +142,57 @@ function attachPsaMetadata(rows: ReconciliationSourceRow[], psaRows: PsaStagingR
   })
 }
 
+function cgcProposalScore(row: CgcStagingRow): number {
+  let score = 0
+  if (row.master_card_match_status === 'MATCHED_CONFIRMED') score += 100
+  if (row.parsed_set_abbr && row.parsed_num && row.parsed_lang) score += 40
+  if (row.parsed_set_abbr) score += 5
+  if (row.parsed_num) score += 5
+  if (row.parsed_lang) score += 5
+  return score
+}
+
+function chooseCgcRow(slab: ReconciliationSourceRow, candidates: CgcStagingRow[]): CgcStagingRow | null {
+  if (!candidates.length) return null
+  const linked = slab.source_cgc_row_id ? candidates.find((candidate) => candidate.id === slab.source_cgc_row_id) : null
+  if (linked) return linked
+  return [...candidates].sort((a, b) => cgcProposalScore(b) - cgcProposalScore(a))[0] ?? null
+}
+
+function attachCgcMetadata(rows: ReconciliationSourceRow[], cgcRows: CgcStagingRow[]): ReconciliationSourceRow[] {
+  const cgcByCert = new Map<string, CgcStagingRow[]>()
+  cgcRows.forEach((row) => {
+    const cert = normalizeCert(row.cert_number)
+    if (!cert) return
+    const bucket = cgcByCert.get(cert) ?? []
+    bucket.push(row)
+    cgcByCert.set(cert, bucket)
+  })
+
+  return rows.map((row) => {
+    const cgc = chooseCgcRow(row, cgcByCert.get(normalizeCert(row.cert)) ?? [])
+    if (!cgc) return row
+    return {
+      ...row,
+      cgc_order_number: cgc.cgc_order_number,
+      cgc_description: cgc.description,
+      cgc_grade: cgc.grade,
+      cgc_numeric_grade: cgc.numeric_grade,
+      cgc_normalized_grade: cgc.normalized_grade,
+      cgc_set_name: cgc.set_name,
+      cgc_set_code: cgc.set_code,
+      cgc_card_number: cgc.card_number,
+      cgc_card_name: cgc.card_name,
+      cgc_parsed_set_abbr: cgc.parsed_set_abbr,
+      cgc_parsed_num: cgc.parsed_num,
+      cgc_parsed_lang: cgc.parsed_lang,
+      cgc_match_status: cgc.master_card_match_status,
+      cgc_review_reason: cgc.parse_review_reason,
+      cgc_label_extra_details: cgc.cgc_label_extra_details,
+    }
+  })
+}
+
 export function SlabReconciliationPage() {
   const [rows, setRows] = useState<ReconciliationSourceRow[]>([])
   const [activeQueue, setActiveQueue] = useState<ReconciliationQueue | 'all'>('all')
@@ -141,6 +212,7 @@ export function SlabReconciliationPage() {
       const sourceRows = (data ?? []) as ReconciliationSourceRow[]
       const certs = [...new Set(sourceRows.map((row) => normalizeCert(row.cert)).filter(Boolean))]
       const psaRows: PsaStagingRow[] = []
+      const cgcRows: CgcStagingRow[] = []
       for (const certChunk of chunk(certs, 100)) {
         const { data: psaData, error: psaError } = await supabase
           .from('psa_grading_order_rows')
@@ -148,8 +220,15 @@ export function SlabReconciliationPage() {
           .in('cert_number', certChunk)
         if (psaError) throw psaError
         psaRows.push(...((psaData ?? []) as PsaStagingRow[]))
+
+        const { data: cgcData, error: cgcError } = await supabase
+          .from('cgc_grading_order_rows')
+          .select('id,cert_number,cgc_order_number,description,grade,numeric_grade,normalized_grade,set_name,set_code,card_number,card_name,parsed_set_abbr,parsed_num,parsed_lang,master_card_match_status,parse_review_reason,cgc_label_extra_details')
+          .in('cert_number', certChunk)
+        if (cgcError) throw cgcError
+        cgcRows.push(...((cgcData ?? []) as CgcStagingRow[]))
       }
-      setRows(attachPsaMetadata(sourceRows, psaRows))
+      setRows(attachCgcMetadata(attachPsaMetadata(sourceRows, psaRows), cgcRows))
     } catch (e) {
       setRows([])
       setError(e instanceof Error ? e.message : 'Could not load slab reconciliation data')
@@ -180,7 +259,7 @@ export function SlabReconciliationPage() {
             Slab Reconciliation Cockpit
           </h1>
           <p className="mt-1 max-w-3xl text-sm text-slate-400">
-            Cert-level slab cleanup with PSA staging metadata joined by cert. Compare current slab fields against the raw PSA label and parser proposal, then approve/edit exceptions instead of reconstructing cards from scratch.
+            Cert-level slab cleanup with PSA + CGC staging metadata joined by cert. Compare current slab fields against the raw grading label and parser proposal, then approve/edit exceptions instead of reconstructing cards from scratch.
           </p>
         </div>
         <div className="flex gap-2">
@@ -249,8 +328,8 @@ export function SlabReconciliationPage() {
             'Queue',
             'Cert / SKU',
             'Current slab',
-            'PSA raw label',
-            'PSA parser proposal',
+            'Grading raw label',
+            'Grading parser proposal',
             'Listing',
             'Metadata',
             'Reasons',
@@ -287,6 +366,40 @@ function ReconciliationTableRow({ row }: { row: ReconciliationRow }) {
         ? 'bg-emerald-950/40 text-emerald-200 border-emerald-900/50'
         : 'bg-slate-800 text-slate-300 border-slate-700'
 
+  const gradingCompany = row.grading_company?.toUpperCase()
+  const cgcHasMetadata = Boolean(
+    row.cgc_description ||
+    row.cgc_order_number ||
+    row.cgc_grade ||
+    row.cgc_numeric_grade ||
+    row.cgc_parsed_set_abbr ||
+    row.cgc_match_status
+  )
+  const useCgcMetadata = gradingCompany === 'CGC' && cgcHasMetadata
+  const staging = useCgcMetadata
+    ? {
+        provider: 'CGC',
+        description: row.cgc_description,
+        order: row.cgc_order_number,
+        grade: row.cgc_grade ?? row.cgc_numeric_grade ?? row.cgc_normalized_grade ?? 'grade —',
+        parsedSet: row.cgc_parsed_set_abbr,
+        parsedNum: row.cgc_parsed_num,
+        parsedLang: row.cgc_parsed_lang,
+        matchStatus: row.cgc_match_status,
+        review: row.cgc_review_reason,
+      }
+    : {
+        provider: 'PSA',
+        description: row.psa_description,
+        order: row.psa_order_number,
+        grade: row.psa_grade ?? row.psa_numeric_grade ?? 'grade —',
+        parsedSet: row.psa_parsed_set_abbr,
+        parsedNum: row.psa_parsed_num,
+        parsedLang: row.psa_parsed_lang,
+        matchStatus: row.psa_match_status,
+        review: row.psa_review_reason,
+      }
+
   return (
     <tr className="transition-colors hover:bg-base-elevated/50">
       <td className="whitespace-nowrap px-3 py-2 text-xs">
@@ -301,15 +414,15 @@ function ReconciliationTableRow({ row }: { row: ReconciliationRow }) {
         <div className="mt-1 text-slate-400">{row.grading_company || 'PSA'} {row.grade || '—'} · {[row.set_abbr, row.num, row.lang].filter(Boolean).join(' / ') || 'missing strict fields'}</div>
       </td>
       <td className="min-w-[24rem] px-3 py-2 text-xs text-slate-300">
-        <div className="text-slate-100">{row.psa_description || 'No PSA staging row found'}</div>
-        {row.psa_order_number && <div className="mt-1 text-2xs text-slate-500">PSA order {row.psa_order_number} · {row.psa_grade || row.psa_numeric_grade || 'grade —'}</div>}
+        <div className="text-slate-100">{staging.description || `No ${staging.provider} staging row found`}</div>
+        {staging.order && <div className="mt-1 text-2xs text-slate-500">{staging.provider} order {staging.order} · {staging.grade}</div>}
       </td>
       <td className="min-w-[15rem] px-3 py-2 text-xs text-slate-300">
         <div className="font-mono text-slate-100">
-          {[row.psa_parsed_set_abbr, row.psa_parsed_num, row.psa_parsed_lang].filter(Boolean).join(' / ') || 'No parser proposal'}
+          {[staging.parsedSet, staging.parsedNum, staging.parsedLang].filter(Boolean).join(' / ') || 'No parser proposal'}
         </div>
-        <div className="mt-1 text-2xs text-slate-500">{row.psa_match_status || 'unparsed'}</div>
-        {row.psa_review_reason && <div className="mt-1 max-w-xs text-2xs text-amber-200">{row.psa_review_reason}</div>}
+        <div className="mt-1 text-2xs text-slate-500">{staging.matchStatus || 'unparsed'}</div>
+        {staging.review && <div className="mt-1 max-w-xs text-2xs text-amber-200">{staging.review}</div>}
       </td>
       <td className="whitespace-nowrap px-3 py-2 text-xs text-slate-300">
         <div>{row.listing_state || '—'}</div>
